@@ -1,0 +1,77 @@
+{
+  "name": "dsh-bilingual-reader",
+  "version": "0.1.0",
+  "description": "DSH better-sidebar plugin: bilingual paper reading with full-text + selection translation, LLM-powered and isolated from the main conversation context.",
+  "type": "module",
+  "main": "./lib/index.mjs",
+  "types": "./lib/types/index.d.ts",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Johnblur/dsh-bilingual-reader.git"
+  },
+  "homepage": "https://github.com/Johnblur/dsh-bilingual-reader",
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "translation",
+    "better-sidebar",
+    "reader"
+  ],
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "import": "./lib/index.mjs"
+    },
+    "./client": "./lib/client.mjs",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/",
+    "src/",
+    "cordis.patch.yml"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "betterSidebar",
+        "slots"
+      ],
+      "platform": "web"
+    }
+  },
+  "dependencies": {
+    "pdfjs-dist": "^4.7.76"
+  },
+  "peerDependencies": {
+    "react": "^18.2.0"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsdown --config tsdown.config.ts && tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "selfcheck": "node --experimental-strip-types scripts/selfcheck.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.0",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tsdown": "^0.22.2",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.8"
+  }
+}

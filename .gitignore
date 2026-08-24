@@ -1,0 +1,15 @@
+# dependencies / build cache
+node_modules/
+.pnpm-store/
+dist/
+
+# logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# ts
+*.tsbuildinfo
+
+# keep lib/ committed: it is the built bundle that makes `dsh plugin add github:...`
+# work without a build step (repo ships build artifacts, like dsh-101).

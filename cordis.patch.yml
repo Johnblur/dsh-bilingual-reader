@@ -1,0 +1,7 @@
+# cordis.patch.yml — bundle layer
+# TODO(实现时): 按 DSH 插件约定, 把本 bundle 挂到 profile 的 bundles 列表 / 注入 host+client。
+# 参考: dsh-101 / @huanlin/dsh-plugin-better-sidebar-plugin-office 的 patch 写法。
+- id: bilingual-reader
+  inject:
+    - llm
+    - fs

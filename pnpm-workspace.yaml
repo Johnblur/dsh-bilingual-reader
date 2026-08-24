@@ -1,0 +1,3 @@
+allowBuilds:
+  canvas: false
+  esbuild: true
