@@ -1,13 +1,12 @@
-// src/client/reader.ts — bilingual reader: 上方原文 / 下方译文, 中间可拖动分割线.
-// React pieces injected by the client factory (classic-script bundle, react via factory require).
-import type { DocChunk, DocumentText, TranslateEvent, TranslateRequest } from '../types.js';
-import { buildSelectionContext } from './context.js';
+// src/client/reader.ts — PDF 阅读 + 划词翻译: 上方 PDF(原生显示, 完美), 下方译文条.
+// Read from the native PDF viewer by copying a selection; we read the OS clipboard,
+// match it against the extracted text (background only) to recover context, then translate.
+import type { DocumentText, TranslateRequest } from '../types.js';
 import { makePdfView } from './PdfView.js';
 
 export interface ReaderController {
-  loadDocument: (file: string) => Promise<{ text: DocumentText; chunks: DocChunk[]; glossary: Record<string, string> }>;
-  translateChunk: (chunkId: string, glossary: Record<string, string>, signal: AbortSignal, emit: (e: TranslateEvent) => void) => Promise<string>;
-  translateSelection: (req: TranslateRequest, signal: AbortSignal, emit: (e: TranslateEvent) => void) => Promise<string>;
+  loadDocument: (file: string) => Promise<{ text: DocumentText; chunks: unknown[]; glossary: Record<string, string> }>;
+  translateSelection: (req: TranslateRequest, signal: AbortSignal, emit: (e: unknown) => void) => Promise<string>;
 }
 
 interface ReactPieces {
@@ -21,84 +20,44 @@ export function makeReader({ h, useState, useEffect, useCallback }: ReactPieces)
   const PdfView = makePdfView({ h, useState, useEffect });
   return function BilingualReader(props: { file?: string; controller?: ReaderController }): any {
     const { file = '', controller } = props as { file?: string; controller?: ReaderController };
-    const [chunks, setChunks] = useState([]);
     const [doc, setDoc] = useState(null);
     const [glossary, setGloss] = useState({});
-    const [tr, setTr] = useState({});
-    const [busy, setBusy] = useState({});
     const [sel, setSel] = useState(null);
     const [selResult, setSelResult] = useState('');
-    const [topPct, setTopPct] = useState(45);
-    const [view, setView] = useState('pdf');
-
-    const push = useCallback((e: TranslateEvent) => {
-      if (e.type === 'delta') setTr((s: Record<string, string>) => ({ ...s, [e.requestId]: (s[e.requestId] ?? '') + e.text }));
-      else if (e.type === 'done') setTr((s: Record<string, string>) => ({ ...s, [e.requestId]: e.full }));
-      else if (e.type === 'error') setTr((s: Record<string, string>) => ({ ...s, [e.requestId]: `[error] ${e.message}` }));
-    }, []);
+    const [topPct, setTopPct] = useState(52);
+    const [contextLen, setContextLen] = useState(250);
 
     const load = useCallback(async () => {
       if (!controller || !file) return;
-      const { text, chunks, glossary } = await controller.loadDocument(file);
-      setDoc(text); setChunks(chunks); setGloss(glossary);
+      const { text, glossary } = await controller.loadDocument(file);
+      setDoc(text); setGloss(glossary);
     }, [controller, file]);
 
     useEffect(() => { void load(); }, [load]);
 
-    async function translateAll(): Promise<void> {
-      if (!controller) return;
-      for (const c of chunks) {
-        if (tr[c.id]) continue;
-        setBusy((b: Record<string, boolean>) => ({ ...b, [c.id]: true }));
-        try {
-          await controller.translateChunk(c.id, glossary, new AbortController().signal, (e) => {
-            push(e);
-            if (e.type === 'done' || e.type === 'error') setBusy((b: Record<string, boolean>) => ({ ...b, [c.id]: false }));
-          });
-        } catch (err) {
-          push({ type: 'error', requestId: c.id, message: err instanceof Error ? err.message : String(err) });
-          setBusy((b: Record<string, boolean>) => ({ ...b, [c.id]: false }));
-        }
-      }
-    }
-
-    async function onSelect(text: string): Promise<void> {
-      if (!text || !doc) return;
-      const ctx = buildSelectionContext(text, doc.fullText);
-      setSel(ctx); setSelResult('');
-      if (!controller) return;
-      try {
-        const res = await controller.translateSelection(
-          { kind: 'selection', selection: ctx.selection, context: ctx.context, glossary, target: '中文' },
-          new AbortController().signal, push,
-        );
-        setSelResult(res);
-      } catch (err) {
-        setSelResult(err instanceof Error ? err.message : String(err));
-      }
-    }
-
     const normalize = (s: string) => s.replace(/\s+/g, ' ').trim();
 
-    // Read the OS clipboard (the user copied a selection from the native PDF viewer),
-    // match it against the extracted text (whitespace-normalized) to recover context,
-    // then translate. The extracted text is only used for matching/context, not shown.
     async function onClipboardTranslate(): Promise<void> {
       try {
         const copied = await navigator.clipboard.readText();
-        if (!copied) { setSelResult('（剪贴板为空，请先在 PDF 里选中并复制）'); return; }
+        if (!copied) { setSelResult('（剪贴板为空：请先在 PDF 里选中并复制）'); return; }
         if (!doc) { setSelResult('（文档未加载）'); return; }
-        const sel = normalize(copied).slice(0, 1500);
+        const selText = normalize(copied).slice(0, 1500);
         const normDoc = normalize(doc.fullText);
         let context = '';
-        const idx = normDoc.indexOf(sel);
-        if (idx >= 0) context = normDoc.slice(Math.max(0, idx - 250), idx + sel.length + 250);
-        setSel({ selection: sel, context });
+        const hits: number[] = [];
+        let i = normDoc.indexOf(selText);
+        while (i >= 0) { hits.push(i); i = normDoc.indexOf(selText, i + 1); }
+        if (hits.length === 1) {
+          const idx = hits[0];
+          context = normDoc.slice(Math.max(0, idx - contextLen), idx + selText.length + contextLen);
+        }
+        setSel({ selection: selText, context });
         setSelResult('');
         if (!controller) return;
         const res = await controller.translateSelection(
-          { kind: 'selection', selection: sel, context, glossary, target: '中文' },
-          new AbortController().signal, push,
+          { kind: 'selection', selection: selText, context, glossary, target: '中文' },
+          new AbortController().signal, () => {},
         );
         setSelResult(res);
       } catch (err) {
@@ -114,11 +73,7 @@ export function makeReader({ h, useState, useEffect, useCallback }: ReactPieces)
       document.body.style.userSelect = 'none';
       const startY = e.clientY;
       const startPct = topPct;
-      const mm = (ev: any) => {
-        ev.preventDefault();
-        const dy = ev.clientY - startY;
-        setTopPct(Math.max(8, Math.min(92, startPct + (dy / rect.height) * 100)));
-      };
+      const mm = (ev: any) => { ev.preventDefault(); setTopPct(Math.max(8, Math.min(92, startPct + ((ev.clientY - startY) / rect.height) * 100))); };
       const done = () => {
         document.body.style.userSelect = '';
         window.removeEventListener('mousemove', mm);
@@ -134,50 +89,26 @@ export function makeReader({ h, useState, useEffect, useCallback }: ReactPieces)
       div.addEventListener('pointerup', done);
     }
 
-    const originalPane = h('div', { style: { height: `${topPct}%`, overflow: 'auto', padding: 16 } },
-      h('div', { style: { position: 'sticky', top: 0, paddingBottom: 8, background: '#fff', display: 'flex', gap: 8, alignItems: 'center' } },
-        h('span', undefined, '原文：'),
-        h('button', { onClick: () => setView('pdf'), style: { fontWeight: view === 'pdf' ? 700 : 400 } }, 'PDF'),
-        h('button', { onClick: () => setView('text'), style: { fontWeight: view === 'text' ? 700 : 400 } }, '文本'),
-        h('button', { onClick: () => void translateAll(), disabled: !chunks.length }, '翻译全文'),
-        h('button', { onClick: () => void onClipboardTranslate() }, '翻译选中(PDF复制后)'),
-      ),
-      view === 'pdf'
-        ? h(PdfView, { file, onSelect })
-        : chunks.map((c: DocChunk) =>
-            h('section', { key: c.id, style: { marginBottom: 10 } },
-              c.heading ? h('h3', { style: { fontWeight: 600 } }, c.heading) : undefined,
-              h('div', { onMouseUp: (e: any) => { const s = window.getSelection(); const t = s ? String(s) : ''; if (t.trim()) void onSelect(t.trim()); } },
-                (c.text || '').split(/\n{2,}/).map((p: string, i: number) => h('p', { key: i, style: { lineHeight: 1.6 } }, p))),
-            ),
-          ),
+    const top = h('div', { style: { height: `${topPct}%`, overflow: 'auto', padding: 8 } },
+      h(PdfView, { file }),
     );
 
     const divider = h('div', { onPointerDown: onDividerDown, style: { height: 8, cursor: 'row-resize', background: '#e2e8f0', flex: 'none', userSelect: 'none', touchAction: 'none' } });
 
-    const translationPane = h('div', { style: { flex: 1, overflow: 'auto', padding: 16, borderTop: '1px solid #e2e8f0' } },
-      sel
-        ? h('div', {},
-            h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
-              h('strong', undefined, '译文'),
-              h('button', { disabled: !selResult, onClick: () => { if (selResult) void navigator.clipboard.writeText(selResult); } }, '复制译文'),
-            ),
-            h('div', { style: { marginTop: 6, lineHeight: 1.7 } }, selResult || '翻译中…'),
-          )
-        : h('div', {},
-            h('strong', undefined, '译文'),
-            chunks.filter((c: DocChunk) => tr[c.id]).length
-              ? chunks.filter((c: DocChunk) => tr[c.id]).map((c: DocChunk) =>
-                  h('div', { key: c.id, style: { marginBottom: 8 } },
-                    c.heading ? h('small', { style: { color: '#718096' } }, c.heading) : undefined,
-                    h('p', { style: { lineHeight: 1.7 } }, tr[c.id])),
-                )
-              : h('p', { style: { color: '#a0aec0' } }, '点「翻译全文」或选中原文里的词，译到这里。'),
-          ),
+    const bottom = h('div', { style: { flex: 1, overflow: 'auto', padding: 12, borderTop: '1px solid #e2e8f0' } },
+      h('div', { style: { display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' } },
+        h('button', { onClick: () => void onClipboardTranslate() }, '翻译选中（在 PDF 里复制后）'),
+        h('label', undefined, '上下文'),
+        h('input', { type: 'range', min: 0, max: 800, step: 50, value: contextLen, onChange: (e: any) => setContextLen(Number(e.target.value)), style: { width: 160 } }),
+        h('span', undefined, contextLen + ' 字'),
+      ),
+      h('div', { style: { marginTop: 10, lineHeight: 1.7 } },
+        sel ? (selResult || '翻译中…') : '在 PDF 里选中一段文字并复制，然后点「翻译选中」。',
+      ),
     );
 
     return h('div', { style: { display: 'flex', flexDirection: 'column', height: '100%' } },
-      originalPane, divider, translationPane,
+      top, divider, bottom,
     );
   };
 }

@@ -1,6 +1,6 @@
 export interface PdfViewProps {
     file: string;
-    onSelect: (text: string) => void;
+    onSelect?: (text: string) => void;
 }
 interface ReactPieces {
     h: (...args: any[]) => any;

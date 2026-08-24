@@ -1,12 +1,11 @@
-import type { DocChunk, DocumentText, TranslateEvent, TranslateRequest } from '../types.js';
+import type { DocumentText, TranslateRequest } from '../types.js';
 export interface ReaderController {
     loadDocument: (file: string) => Promise<{
         text: DocumentText;
-        chunks: DocChunk[];
+        chunks: unknown[];
         glossary: Record<string, string>;
     }>;
-    translateChunk: (chunkId: string, glossary: Record<string, string>, signal: AbortSignal, emit: (e: TranslateEvent) => void) => Promise<string>;
-    translateSelection: (req: TranslateRequest, signal: AbortSignal, emit: (e: TranslateEvent) => void) => Promise<string>;
+    translateSelection: (req: TranslateRequest, signal: AbortSignal, emit: (e: unknown) => void) => Promise<string>;
 }
 interface ReactPieces {
     h: (...args: any[]) => any;

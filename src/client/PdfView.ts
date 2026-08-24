@@ -3,7 +3,7 @@
 // the browser's own PDF engine. Selection/translation is done via the "文本" view
 // (window.getSelection() on extracted text), since the native renderer doesn't expose
 // its text to JS. onSelect is kept for the text-view path (unused here).
-export interface PdfViewProps { file: string; onSelect: (text: string) => void }
+export interface PdfViewProps { file: string; onSelect?: (text: string) => void }
 
 interface ReactPieces {
   h: (...args: any[]) => any;
