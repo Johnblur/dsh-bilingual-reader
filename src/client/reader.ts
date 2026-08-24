@@ -27,6 +27,7 @@ export function makeReader({ h, useState, useEffect, useCallback }: ReactPieces)
     const [sel, setSel] = useState(null);
     const [selResult, setSelResult] = useState('');
     const [topPct, setTopPct] = useState(45);
+    const [view, setView] = useState('pdf');
 
     const push = useCallback((e: TranslateEvent) => {
       if (e.type === 'delta') setTr((s: Record<string, string>) => ({ ...s, [e.requestId]: (s[e.requestId] ?? '') + e.text }));
@@ -85,16 +86,21 @@ export function makeReader({ h, useState, useEffect, useCallback }: ReactPieces)
     }
 
     const originalPane = h('div', { style: { height: `${topPct}%`, overflow: 'auto', padding: 16 } },
-      h('div', { style: { position: 'sticky', top: 0, paddingBottom: 8, background: '#fff' } },
+      h('div', { style: { position: 'sticky', top: 0, paddingBottom: 8, background: '#fff', display: 'flex', gap: 8, alignItems: 'center' } },
+        h('span', undefined, '原文：'),
+        h('button', { onClick: () => setView('pdf'), style: { fontWeight: view === 'pdf' ? 700 : 400 } }, 'PDF'),
+        h('button', { onClick: () => setView('text'), style: { fontWeight: view === 'text' ? 700 : 400 } }, '文本'),
         h('button', { onClick: () => void translateAll(), disabled: !chunks.length }, '翻译全文'),
       ),
-      chunks.map((c: DocChunk) =>
-        h('section', { key: c.id, style: { marginBottom: 10 } },
-          c.heading ? h('h3', { style: { fontWeight: 600 } }, c.heading) : undefined,
-          h('div', { onMouseUp: (e: any) => { const s = window.getSelection(); const t = s ? String(s) : ''; if (t.trim()) void onSelect(t.trim()); } },
-            (c.text || '').split(/\n{2,}/).map((p: string, i: number) => h('p', { key: i, style: { lineHeight: 1.6 } }, p))),
-        ),
-      ),
+      view === 'pdf'
+        ? h('iframe', { src: `/bilingual-reader/file?path=${encodeURIComponent(file)}`, style: { width: '100%', height: 'calc(100% - 40px)', border: 0 } })
+        : chunks.map((c: DocChunk) =>
+            h('section', { key: c.id, style: { marginBottom: 10 } },
+              c.heading ? h('h3', { style: { fontWeight: 600 } }, c.heading) : undefined,
+              h('div', { onMouseUp: (e: any) => { const s = window.getSelection(); const t = s ? String(s) : ''; if (t.trim()) void onSelect(t.trim()); } },
+                (c.text || '').split(/\n{2,}/).map((p: string, i: number) => h('p', { key: i, style: { lineHeight: 1.6 } }, p))),
+            ),
+          ),
     );
 
     const divider = h('div', { onMouseDown: onDividerDown, style: { height: 8, cursor: 'row-resize', background: '#e2e8f0', flex: 'none' } });

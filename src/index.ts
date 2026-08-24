@@ -2,6 +2,7 @@
 // Exposes /bilingual-reader/* HTTP routes so the client tab can extract PDF text and
 // translate. Translation runs through the injected `llm` service in an ISOLATED call
 // (never appends to the main conversation).
+import { promises as fs } from 'node:fs';
 import { extractPdf } from './host/pdf.js';
 import { chunkDocument } from './host/chunk.js';
 import { extractGlossary } from './host/glossary.js';
@@ -13,7 +14,7 @@ import type { DocChunk, TranslateRequest } from './types.js';
 export const inject = ['llm', 'webServer'];
 
 interface HttpReq { method?: string; url?: string; on: (e: 'data' | 'end' | 'error', cb: (...a: any[]) => void) => void }
-interface HttpRes { writeHead: (code: number, headers?: Record<string, string>) => void; end: (body?: string) => void }
+interface HttpRes { writeHead: (code: number, headers?: Record<string, string>) => void; end: (body?: string | Buffer | Uint8Array) => void }
 
 export function apply(ctx: { llm: unknown; webServer: unknown }): void {
   const gateway: LlmGateway = createLlmGateway(ctx.llm);
@@ -24,8 +25,17 @@ export function apply(ctx: { llm: unknown; webServer: unknown }): void {
   let glossary: Record<string, string> = {};
 
   ws.register({ kind: 'prefix', path: '/bilingual-reader', handler: async (req, res) => {
-    const pathname = new URL(req.url ?? '/', 'http://x').pathname;
+    const u = new URL(req.url ?? '/', 'http://x');
+    const pathname = u.pathname;
     try {
+      // Serve the original PDF so the client can embed it as the "原文".
+      if (pathname === '/bilingual-reader/file' && req.method === 'GET') {
+        const file = decodeURIComponent(u.searchParams.get('path') || '');
+        const data = await fs.readFile(file);
+        res.writeHead(200, { 'content-type': 'application/pdf', 'cache-control': 'no-cache' });
+        res.end(data);
+        return;
+      }
       const body = await readJson(req);
       if (pathname === '/bilingual-reader/extract' && req.method === 'POST') {
         const file = String(body?.path ?? '');
