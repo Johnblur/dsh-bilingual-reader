@@ -81,17 +81,21 @@ export function makeReader({ h, useState, useEffect, useCallback }: ReactPieces)
       const container = e.currentTarget.parentElement;
       const rect = container.getBoundingClientRect();
       const div = e.currentTarget;
-      try { div.setPointerCapture(e.pointerId); } catch {}
       document.body.style.userSelect = 'none';
-      const mm = (ev: any) => { setTopPct(Math.max(8, Math.min(92, ((ev.clientY - rect.top) / rect.height) * 100))); };
-      const mu = (ev: any) => {
-        try { div.releasePointerCapture(ev.pointerId); } catch {}
-        div.removeEventListener('pointermove', mm);
-        div.removeEventListener('pointerup', mu);
+      const mm = (ev: any) => { ev.preventDefault(); setTopPct(Math.max(8, Math.min(92, ((ev.clientY - rect.top) / rect.height) * 100))); };
+      const done = () => {
         document.body.style.userSelect = '';
+        window.removeEventListener('mousemove', mm);
+        window.removeEventListener('mouseup', done);
+        try { div.releasePointerCapture(e.pointerId); } catch {}
+        div.removeEventListener('pointermove', mm);
+        div.removeEventListener('pointerup', done);
       };
+      window.addEventListener('mousemove', mm);
+      window.addEventListener('mouseup', done);
+      try { div.setPointerCapture(e.pointerId); } catch {}
       div.addEventListener('pointermove', mm);
-      div.addEventListener('pointerup', mu);
+      div.addEventListener('pointerup', done);
     }
 
     const originalPane = h('div', { style: { height: `${topPct}%`, overflow: 'auto', padding: 16 } },
@@ -112,7 +116,7 @@ export function makeReader({ h, useState, useEffect, useCallback }: ReactPieces)
           ),
     );
 
-    const divider = h('div', { onMouseDown: onDividerDown, style: { height: 8, cursor: 'row-resize', background: '#e2e8f0', flex: 'none', userSelect: 'none', touchAction: 'none' } });
+    const divider = h('div', { onPointerDown: onDividerDown, style: { height: 8, cursor: 'row-resize', background: '#e2e8f0', flex: 'none', userSelect: 'none', touchAction: 'none' } });
 
     const translationPane = h('div', { style: { flex: 1, overflow: 'auto', padding: 16, borderTop: '1px solid #e2e8f0' } },
       sel
