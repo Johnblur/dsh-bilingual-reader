@@ -42,6 +42,7 @@ export function makePdfView({ h, useState, useEffect }: ReactPieces) {
           await pg.render({ canvasContext: cctx, viewport }).promise;
           const textDiv = document.createElement('div');
           textDiv.style.cssText = `position:absolute;top:0;left:0;width:${viewport.width}px;height:${viewport.height}px;`;
+          textDiv.style.setProperty('--scale-factor', String(viewport.scale));
           const tl = new pdfjsLib.TextLayer({ textContentSource: pg.streamTextContent(), container: textDiv, viewport });
           await tl.render();
           const wrapper = document.createElement('div');
