@@ -4,6 +4,7 @@
 // (never appends to the main conversation).
 import { promises as fs } from 'node:fs';
 import { createRequire } from 'node:module';
+import * as path from 'node:path';
 import { extractPdf } from './host/pdf.js';
 import { chunkDocument } from './host/chunk.js';
 import { extractGlossary } from './host/glossary.js';
@@ -20,6 +21,7 @@ interface HttpRes { writeHead: (code: number, headers?: Record<string, string>) 
 export function apply(ctx: { llm: unknown; webServer: unknown }): void {
   const gateway: LlmGateway = createLlmGateway(ctx.llm);
   const nodeRequire = createRequire(import.meta.url);
+  const pdfjsDir = path.dirname(nodeRequire.resolve('pdfjs-dist/package.json'));
   const ws = ctx.webServer as { register: (r: { kind: string; path: string; handler: (req: HttpReq, res: HttpRes) => void }) => void };
 
   // single-document state (extract populates chunks; translate-chunk looks them up)
@@ -30,6 +32,19 @@ export function apply(ctx: { llm: unknown; webServer: unknown }): void {
     const u = new URL(req.url ?? '/', 'http://x');
     const pathname = u.pathname;
     try {
+      // Serve pdf.js CMap / standard-font data so the client's text layer can render
+      // CJK + non-embedded fonts correctly (otherwise it falls back to a wrong font,
+      // causing the text layer to misalign).
+      if ((pathname.startsWith('/bilingual-reader/cmaps/') || pathname.startsWith('/bilingual-reader/standard_fonts/')) && req.method === 'GET') {
+        const sub = pathname.startsWith('/bilingual-reader/cmaps/')
+          ? path.join(pdfjsDir, 'cmaps', path.basename(pathname))
+          : path.join(pdfjsDir, 'standard_fonts', path.basename(pathname));
+        try {
+          res.writeHead(200, { 'content-type': 'application/octet-stream', 'cache-control': 'no-cache' });
+          res.end(await fs.readFile(sub));
+        } catch { res.writeHead(404); res.end(); }
+        return;
+      }
       // Serve the original PDF so the client can embed it as the "原文".
       if (pathname === '/bilingual-reader/file' && req.method === 'GET') {
         const file = decodeURIComponent(u.searchParams.get('path') || '');

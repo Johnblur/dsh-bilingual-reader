@@ -30,7 +30,12 @@ export function makePdfView({ h, useState, useEffect }: ReactPieces) {
           pdfjsLib.GlobalWorkerOptions.workerSrc = WORKER_URL;
           const res = await fetch('/bilingual-reader/file?path=' + encodeURIComponent(file));
           const bytes = await res.arrayBuffer();
-          const doc = await pdfjsLib.getDocument({ data: new Uint8Array(bytes) }).promise;
+          const doc = await pdfjsLib.getDocument({
+            data: new Uint8Array(bytes),
+            cMapUrl: '/bilingual-reader/cmaps/',
+            cMapPacked: true,
+            standardFontDataUrl: '/bilingual-reader/standard_fonts/',
+          }).promise;
           const pg = await doc.getPage(page);
           const viewport = pg.getViewport({ scale: 1.6 });
           if (!alive) return;
