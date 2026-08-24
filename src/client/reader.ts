@@ -68,8 +68,9 @@ export function makeReader({ h, useState, useEffect, useCallback }: ReactPieces)
       }
     }
 
-    // Electron-only: poll the host clipboard route; when the system clipboard changes,
-    // auto-translate. Falls back to the button on web.
+    // Auto-translate on copy: poll the host clipboard route; when the system clipboard
+    // changes (Electron can read it), translate immediately. Button remains as a reliable
+    // fallback (web / if polling is unavailable).
     useEffect(() => {
       let last = '';
       const poll = async () => {
