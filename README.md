@@ -1,37 +1,59 @@
 # dsh-bilingual-reader
 
-在 **dsh-better-sidebar** 里读论文原文 + 全文/划词**双语翻译**的 DSH 插件。翻译由大模型完成、占位并**完全隔离主对话上下文**。
+中文 | [English](./README.en.md)
 
-- 全文翻译：原文/译文**上下并排**。
-- 划词翻译：右侧固定面板，且带**文档上下文**（选中 + 所在段 + 相邻段 + 术语表）。
-- 取文：PDF 为主，优先尝试 arXiv 文本/HTML 版。
-- 隔离：所有翻译走 `ctx.llm` 的独立一次性调用，不写主会话。
+在 **DeepSeek Harness (DSH)** 的 `dsh-better-sidebar` 里阅读论文 PDF，并用大模型**划词翻译**的插件。
 
-详见 [DESIGN.md](./DESIGN.md)。
+> 读文献时：在侧边栏打开 PDF → 选中一句话复制 → 插件**结合上下文**用大模型译成中文。翻译走 DSH 现有模型、**完全隔离主对话**，只作阅读辅助。
 
-## 安装（仓库: github.com/Johnblur/dsh-bilingual-reader）
+## 使用场景
+- 你在 DSH 的侧边栏（better-sidebar）里打开一篇论文 PDF 阅读。
+- 想快速弄懂某个句子/术语的意思：**选中 + 复制**，插件自动翻译。
+- 不想每次把内容丢到主对话里去问 —— 翻译只发生在插件里，**不污染主对话上下文**。
+
+## 特性
+- **PDF 原生渲染**：用浏览器 / Electron 的 PDF 引擎显示原文，**排版完美**、可翻页、可复制，和内置阅读器一致。
+- **划词翻译**：复制选中的文本 → 桌面版（Electron）**自动翻译**；无法自动时点「翻译选中」按钮。
+- **上下文感知**：优先在全文里找到选中内容的**唯一位置**，取其周边作为上下文；唯一命中最准。多处出现 / 未命中则**无上下文直译**（避免用错上下文误导）。
+- **上下文长度可调**：滑块控制取周围多少字作上下文。
+- **原文 + 译文对照**：下方同时显示你复制的原文和译文，方便核对。
+- **隔离主对话**：翻译走 `ctx.llm` 的一次性独立调用，**不写回主会话**。
+
+## 安装
 
 ```sh
 dsh plugin add github:Johnblur/dsh-bilingual-reader
 ```
-（仓库推送到 GitHub 后即可安装；`lib/` 会提交构建产物，支持免编译安装。）
 
-## 状态（v0.1 已实现，待构建验证）
+装完**彻底退出托盘里的 DSH Desktop** 再重新打开。
 
-设计文档 + 源码骨架 + 核心逻辑（全文/划词翻译、上下文窗、术语表、分节缓存、隔离网关）已实现；
-含纯逻辑与"隔离"单元测试（`test/*.test.ts`）。
+## 使用
+1. better-sidebar 侧栏的 `+` → 打开「**双语阅读**」标签。
+2. 输入 / 选择 PDF 路径 → 加载。
+3. 在上方 PDF 里**选中一段文字并复制**：
+   - 桌面版（Electron）：检测到剪贴板变化，**自动翻译**。
+   - web 端或自动不可用时：点「**翻译选中**」按钮。
+4. 下方显示 **原文 + 译文**；用「上下文」滑块调整取上下文长度。
 
-> 依赖说明：
-> - DSH 运行时提供的 peer 包（`dsh-better-sidebar`、`@deepseek-ai/dsh-llm`、`@deepseek-ai/dsh-client-runtime`、`cordis`、`react`）
->   **不由 npm 安装**，由运行中的 DSH 注入；`.npmrc` 已设 `auto-install-peers=false` + `strict-peer-dependencies=false` 以跳过这些。
-> - 需从 npm 安装的是 `pdfjs-dist`（dependency）与构建/测试用 devDependencies。
-> - 两处 `VERIFY`：`src/host/llmClient.ts`（`ctx.llm.prepareCall/stream` 的 messages 与 chunk 形状）、
->   `src/client/register.ts`（`registerFileViewer` 描述符字段），按你本地 DSH 类型校准。
+## 依赖与说明
+- 依赖 DSH 运行时注入的服务（`dsh-better-sidebar`、`@deepseek-ai/dsh-llm`）以及 `pdfjs-dist`（主机端取文）。
+- 模型**复用 DSH 现有模型与 API key**（无需额外 key）。可用环境变量覆盖：
+  - `DSH_BILINGUAL_PROVIDER`（默认 `deepseek-official`）
+  - `DSH_BILINGUAL_MODEL`（默认 `deepseek-v4-flash-vision-exp`）
+- 「自动翻译」依赖主机读取系统剪贴板（Electron 桌面版）；纯 web 端没有该能力，走按钮。
 
-本地验证/构建：
+## 本地构建（给开发者）
+
 ```sh
-pnpm i          # 只装 pdfjs-dist + 构建/测试依赖
-pnpm test       # vitest：纯逻辑 + 隔离测试（不需 DSH 内部类型）
-pnpm build      # tsdown -> lib/ (host+client ESM) && tsc -> lib/types
-pnpm selfcheck  # Node ≥22.6：快速跑纯逻辑断言（绕过沙箱禁子进程）
+pnpm i
+pnpm build      # tsdown -> lib/ + tsc -> lib/types
+pnpm test       # vitest：纯逻辑 + 隔离测试
 ```
+
+## 常见问题
+- **复制后不自动翻译**：确认你用的是桌面版（Electron）；或直接点「翻译选中」按钮。
+- **译文没用上下文**：选中的词在文中出现多次 / 没匹配到唯一位置 → 插件主动用无上下文直译，避免错误上下文。
+- **想更准**：选中**一整句**而不是单词，通常能唯一匹配、上下文更准。
+
+## License
+MIT
