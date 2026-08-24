@@ -1,40 +1,33 @@
-// src/client/context.ts — pure selection-context builder (no React dependency).
+// src/client/context.ts — minimal selection context (token-lean, for internal use only).
 export interface SelectionContext {
   selection: string;
   context: string;
 }
 
 /**
- * Build the context window for a highlighted selection: the paragraph containing
- * the selection ± `windowSize` neighboring paragraphs (default 1). This satisfies
- * "translation must use document context, not just the bare selection."
+ * Minimal context window around the selection: a short strip of nearby text
+ * (default ±200 chars). This is ENOUGH to disambiguate the word's meaning without
+ * burning tokens on the whole doc or paragraph. The context is used INTERNALLY for
+ * translation — it is NOT shown to the user.
  */
-export function buildSelectionContext(
-  selection: string,
-  docText: string,
-  paragraphs: Array<{ start: number; end: number }>,
-  windowSize = 1,
-): SelectionContext {
+export function buildSelectionContext(selection: string, docText: string, windowChars = 200): SelectionContext {
   if (!selection || !docText) return { selection, context: '' };
   const idx = docText.indexOf(selection);
-  const lines = docText.split(/\r?\n/);
-  const startLine = idx >= 0 ? directionCount(docText, idx, '\n') : 0;
-  let pIdx = paragraphs.findIndex((p) => startLine >= p.start && startLine < p.end);
-  if (pIdx < 0) pIdx = paragraphs.length ? 0 : -1;
-  if (pIdx < 0) return { selection, context: selection };
-
-  const lo = Math.max(0, pIdx - windowSize);
-  const hi = Math.min(paragraphs.length - 1, pIdx + windowSize);
-  const parts: string[] = [];
-  for (let i = lo; i <= hi; i++) {
-    const p = paragraphs[i];
-    parts.push(lines.slice(p.start, p.end).join('\n'));
-  }
-  return { selection, context: parts.join('\n\n') };
+  if (idx < 0) return { selection, context: '' };
+  const start = Math.max(0, idx - windowChars);
+  const end = Math.min(docText.length, idx + selection.length + windowChars);
+  const raw = docText.slice(start, end).trim();
+  return { selection, context: raw.replace(/\s+/g, ' ') };
 }
 
-function directionCount(s: string, upto: number, char: string): number {
-  let n = 0;
-  for (let i = 0; i < upto; i++) if (s[i] === char) n++;
-  return n;
+/**
+ * Paragraph-window variant (kept for API stability). Prefer buildSelectionContext.
+ */
+export function buildSelectionContextParagraphs(
+  selection: string,
+  docText: string,
+  _paragraphs: Array<{ start: number; end: number }>,
+  _windowSize = 1,
+): SelectionContext {
+  return buildSelectionContext(selection, docText, 200);
 }

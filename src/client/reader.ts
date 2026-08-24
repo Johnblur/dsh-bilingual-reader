@@ -56,7 +56,7 @@ export function makeReader({ h, useState, useEffect, useCallback }: ReactPieces)
 
     async function onSelect(text: string): Promise<void> {
       if (!text || !doc) return;
-      const ctx = buildSelectionContext(text, doc.fullText, doc.paragraphs, 1);
+      const ctx = buildSelectionContext(text, doc.fullText);
       setSel(ctx); setSelResult('');
       if (!controller) return;
       const res = await controller.translateSelection(
@@ -90,12 +90,9 @@ export function makeReader({ h, useState, useEffect, useCallback }: ReactPieces)
         h('button', { disabled: !selResult, onClick: () => { if (selResult) void navigator.clipboard.writeText(selResult); } }, '复制译文'),
       ),
       sel
-        ? [
-            h('div', { style: { marginTop: 8 } }, h('small', undefined, '选中：'), h('blockquote', { style: { borderLeft: '2px solid #cbd5e0', paddingLeft: 8, margin: '4px 0' } }, sel.selection)),
-            h('div', { style: { marginTop: 8 } }, h('small', undefined, '上下文：'), h('pre', { style: { whiteSpace: 'pre-wrap', fontSize: 12, color: '#718096' } }, sel.context)),
-          ]
-        : h('p', { style: { color: '#a0aec0' } }, '选中文字后译文显示在此。'),
-      h('div', { style: { marginTop: 12 } }, selResult || ''),
+        ? h('p', { style: { color: '#718096', marginTop: 8 } }, '译文（已用上下文理解词义）：')
+        : h('p', { style: { color: '#a0aec0', marginTop: 8 } }, '选中文字后，译文会显示在这里。'),
+      h('div', { style: { marginTop: 8, lineHeight: 1.7 } }, selResult || ''),
     );
 
     return h('div', { style: { display: 'flex', height: '100%' } },
