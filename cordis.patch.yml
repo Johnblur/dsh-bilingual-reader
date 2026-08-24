@@ -1,7 +1,8 @@
-# cordis.patch.yml — bundle layer
-# TODO(实现时): 按 DSH 插件约定, 把本 bundle 挂到 profile 的 bundles 列表 / 注入 host+client。
-# 参考: dsh-101 / @huanlin/dsh-plugin-better-sidebar-plugin-office 的 patch 写法。
-- id: bilingual-reader
-  inject:
-    - llm
-    - fs
+# dsh-bilingual-reader bundle layer: plain insert so DSH can apply it.
+# `name` is the package entry; the loader resolves it from profile node_modules.
+# (A config/expression row like `inject:` needs a restart and won't hot-mount.)
+# The plugin's host/client inject + apply live in lib/index.mjs (host) and
+# lib/client.mjs (client), declared by the package's `main` / `dsh.client`.
+- insert:
+    - id: dsh-bilingual-reader
+      name: 'dsh-bilingual-reader'

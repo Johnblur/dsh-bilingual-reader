@@ -1,22 +1,32 @@
-// tsdown.config.ts — builds host (lib/index.js) + client (lib/client.js) ESM bundles.
-// Output mirrors package.json exports ("lib/"), platform=node so Node built-ins
-// (node:fs/path/crypto) are recognized instead of warning; peer/installed deps are
-// externalized via deps.neverBundle so lib/ stays lean (DSH provides react; pdfjs-dist
-// is installed as a dependency and resolved at runtime).
+// tsdown.config.ts — two builds:
+//  * host  (src/index.ts)        -> lib/index.mjs  (ESM; DSH Node host loads main via ESM exports)
+//  * client(src/client/index.ts) -> lib/client.js  (CJS wrapped in window.__ModuleLoader__.load)
+// Output matches package.json: main = lib/index.mjs, exports["./client"] = lib/client.js.
+//
+// VERIFY: follows the DSH/office-plugin convention (client = CJS __ModuleLoader__ factory
+// bundle with react externalized via the factory's `require`). Adjust if your tsdown differs.
 import { defineConfig } from 'tsdown';
 
-export default defineConfig({
-  entry: {
-    index: 'src/index.ts',
-    client: 'src/client.tsx',
+export default defineConfig([
+  {
+    name: 'host',
+    entry: { index: 'src/index.ts' },
+    format: ['esm'],
+    outDir: 'lib',
+    target: 'es2022',
+    platform: 'node',
+    clean: true,
+    dts: false,
+    deps: { neverBundle: ['pdfjs-dist'] },
   },
-  format: ['esm'],
-  outDir: 'lib',
-  target: 'es2022',
-  platform: 'node',
-  clean: true,
-  dts: false,
-  deps: {
-    neverBundle: ['react', 'react-dom', 'pdfjs-dist'],
+  {
+    name: 'client',
+    entry: { client: 'src/client/index.ts' },
+    format: ['cjs'],
+    outDir: 'lib',
+    target: 'es2022',
+    platform: 'browser',
+    dts: false,
+    deps: { neverBundle: ['react', 'react-dom'] },
   },
-});
+]);

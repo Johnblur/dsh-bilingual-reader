@@ -23,7 +23,7 @@
       "types": "./lib/types/index.d.ts",
       "import": "./lib/index.mjs"
     },
-    "./client": "./lib/client.mjs",
+    "./client": "./lib/client.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },
