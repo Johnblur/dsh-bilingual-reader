@@ -1,9 +1,18 @@
 // src/client/app.ts — client factory: (require) => module { inject, apply }.
-// Registers a proper better-sidebar TAB (id/title/component) — NOT a file viewer —
-// so it is compatible with sidebar updates and never breaks the viewer inventory.
+// Registers a proper better-sidebar TAB and gives it a fetch-based controller that
+// calls the host /bilingual-reader/* routes (extract + isolated translate).
 // React is sourced from the factory's `require` (single DSH React instance).
 import { makeReader } from './reader.js';
 import type * as ReactNS from 'react';
+
+async function post(path: string, body: unknown): Promise<any> {
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body ?? {}),
+  });
+  return res.json();
+}
 
 export function makeClientFactory(): (require: (m: string) => unknown) => { inject: string[]; apply: (ctx: unknown) => void } {
   return (require) => {
@@ -12,14 +21,25 @@ export function makeClientFactory(): (require: (m: string) => unknown) => { inje
     const h = react.createElement as any;
     const BilingualReader = makeReader({ h, useState, useEffect: react.useEffect as any, useCallback: react.useCallback as any });
 
-    // Tab body: a small path picker + the reader. The host facade (extract/translate)
-    // is wired below via a route the host registers; TODO wire when host channel lands.
+    const controller = {
+      loadDocument: (file: string) => post('/bilingual-reader/extract', { path: file }),
+      translateChunk: async (chunkId: string, _glossary: Record<string, string>, _signal: AbortSignal, emit: (e: any) => void) => {
+        emit({ type: 'start', requestId: chunkId });
+        const r = await post('/bilingual-reader/translate-chunk', { chunkId });
+        if (r && typeof r.text === 'string') { emit({ type: 'done', requestId: chunkId, full: r.text }); return r.text; }
+        throw new Error((r && r.error) || 'translate-chunk failed');
+      },
+      translateSelection: async (req: any, _signal: AbortSignal, _emit: (e: any) => void) => {
+        const r = await post('/bilingual-reader/translate-selection', req);
+        return (r && r.text) || '';
+      },
+    };
+
     function ReaderTab(props: any): any {
       const scope = props?.scope;
       const cwd: string = scope?.cwd ?? '';
       const [path, setPath] = useState(cwd ? `${cwd}\\` : '');
       const [chosen, setChosen] = useState('');
-      const controller = (props?.ctx?.bilingualReader as any);
       return h('div', { style: { padding: 12, display: 'flex', flexDirection: 'column', gap: 8, height: '100%' } },
         h('div', { style: { display: 'flex', gap: 8 } },
           h('input', { value: path, onChange: (e: any) => setPath(e.target.value), style: { flex: 1 } }),

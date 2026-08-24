@@ -1,73 +1,72 @@
 // src/index.ts — host plugin entry.
-// Assemblies the host-side ReaderController (extract + chunk + glossary + isolated
-// translation + cache) using the injected `llm` service (LlmRuntime).
-//
-// VERIFY: how `ctx.llm` is obtained (inject key 'llm') and how the controller is
-// handed to the client half in your DSH build (RPC / viewer props).
-import type { DocChunk, DocumentText, TranslateEvent, TranslateRequest } from './types.js';
+// Exposes /bilingual-reader/* HTTP routes so the client tab can extract PDF text and
+// translate. Translation runs through the injected `llm` service in an ISOLATED call
+// (never appends to the main conversation).
 import { extractPdf } from './host/pdf.js';
 import { chunkDocument } from './host/chunk.js';
 import { extractGlossary } from './host/glossary.js';
 import { createLlmGateway, type LlmGateway } from './host/llmClient.js';
 import { translateChunk, translateSelection } from './host/translate.js';
-import { loadCache, saveCache, hashText, type CacheEntry } from './host/cache.js';
+import { resolveModel } from './host/model.js';
+import type { DocChunk, TranslateRequest } from './types.js';
 
-export const inject = ['llm'];
+export const inject = ['llm', 'webServer'];
 
-export interface ReaderController {
-  loadDocument: (file: string) => Promise<{ text: DocumentText; chunks: DocChunk[]; glossary: Record<string, string> }>;
-  translateChunk: (chunkId: string, glossary: Record<string, string>, signal: AbortSignal, emit: (e: TranslateEvent) => void) => Promise<string>;
-  translateSelection: (req: TranslateRequest, signal: AbortSignal, emit: (e: TranslateEvent) => void) => Promise<string>;
-}
+interface HttpReq { method?: string; url?: string; on: (e: 'data' | 'end' | 'error', cb: (...a: any[]) => void) => void }
+interface HttpRes { writeHead: (code: number, headers?: Record<string, string>) => void; end: (body?: string) => void }
 
-export function createReaderController(llm: unknown): ReaderController {
-  const gateway: LlmGateway = createLlmGateway(llm);
-  const docCache = new Map<string, { chunks: DocChunk[]; glossary: Record<string, string> }>();
-  let currentFile = '';
+export function apply(ctx: { llm: unknown; webServer: unknown }): void {
+  const gateway: LlmGateway = createLlmGateway(ctx.llm);
+  const ws = ctx.webServer as { register: (r: { kind: string; path: string; handler: (req: HttpReq, res: HttpRes) => void }) => void };
 
-  return {
-    async loadDocument(file) {
-      currentFile = file;
-      const text = await extractPdf(file);
-      const chunks = chunkDocument(text);
-      const glossary = extractGlossary(chunks);
-      docCache.set(file, { chunks, glossary });
-      return { text, chunks, glossary };
-    },
+  // single-document state (extract populates chunks; translate-chunk looks them up)
+  let chunks: DocChunk[] = [];
+  let glossary: Record<string, string> = {};
 
-    async translateChunk(chunkId, glossary, signal, emit) {
-      const entry = [...docCache.values()].find((d) => d.chunks.some((c) => c.id === chunkId));
-      const chunk = entry?.chunks.find((c) => c.id === chunkId);
-      if (!chunk) throw new Error(`chunk not found: ${chunkId}`);
-
-      const cache = await loadCache(currentFile || chunkId);
-      const hash = hashText(chunk.text);
-      if (cache[chunkId] && cache[chunkId].hash === hash && cache[chunkId].text) {
-        emit({ type: 'done', requestId: chunkId, full: cache[chunkId].text });
-        return cache[chunkId].text;
+  ws.register({ kind: 'prefix', path: '/bilingual-reader', handler: async (req, res) => {
+    const pathname = new URL(req.url ?? '/', 'http://x').pathname;
+    try {
+      const body = await readJson(req);
+      if (pathname === '/bilingual-reader/extract' && req.method === 'POST') {
+        const file = String(body?.path ?? '');
+        const text = await extractPdf(file);
+        chunks = chunkDocument(text);
+        glossary = extractGlossary(chunks);
+        return json(res, 200, { text, chunks, glossary });
       }
-      const result = await translateChunk(gateway, chunk, { kind: 'full-text', glossary, target: '中文' }, signal, emit, chunkId);
-      cache[chunkId] = { hash, text: result } as CacheEntry;
-      if (currentFile) await saveCache(currentFile, cache);
-      emit({ type: 'done', requestId: chunkId, full: result });
-      return result;
-    },
-
-    async translateSelection(req, signal, emit) {
-      const requestId = `sel-${Date.now()}`;
-      const result = await translateSelection(gateway, req.selection ?? '', req.context ?? '', req, signal, emit, requestId);
-      emit({ type: 'done', requestId, full: result });
-      return result;
-    },
-  };
+      if (pathname === '/bilingual-reader/translate-chunk' && req.method === 'POST') {
+        const chunkId = String(body?.chunkId ?? '');
+        const chunk = chunks.find((c) => c.id === chunkId);
+        if (!chunk) return json(res, 404, { error: 'chunk not found: ' + chunkId });
+        const out = await translateChunk(gateway, chunk, { kind: 'full-text', glossary, target: '中文' }, new AbortController().signal, () => {}, chunkId);
+        return json(res, 200, { requestId: chunkId, text: out });
+      }
+      if (pathname === '/bilingual-reader/translate-selection' && req.method === 'POST') {
+        const reqBody = body as unknown as TranslateRequest & { selection?: string; context?: string };
+        const requestId = `sel-${Date.now()}`;
+        const out = await translateSelection(gateway, reqBody.selection ?? '', reqBody.context ?? '', { ...reqBody, kind: 'selection', glossary }, new AbortController().signal, () => {}, requestId);
+        return json(res, 200, { requestId, text: out });
+      }
+      return json(res, 404, { error: 'unknown route ' + pathname });
+    } catch (e) {
+      return json(res, 500, { error: e instanceof Error ? e.message : String(e) });
+    }
+  } });
 }
 
-export function apply(ctx: { llm: unknown; effect: (fn: unknown) => unknown }): void {
-  const controller = createReaderController(ctx.llm);
-  ctx.effect(() => registerHostController(controller));
+function readJson(req: HttpReq): Promise<Record<string, unknown> | undefined> {
+  return new Promise((resolve, reject) => {
+    const parts: Buffer[] = [];
+    req.on('data', (c: Buffer) => parts.push(c));
+    req.on('end', () => {
+      try { resolve(parts.length ? JSON.parse(Buffer.concat(parts).toString('utf8')) : undefined); }
+      catch (e) { reject(e); }
+    });
+    req.on('error', (e) => reject(e));
+  });
 }
 
-function registerHostController(_controller: ReaderController): void {
-  // TODO: publish the controller to the client half (RPC / inject / viewer prop).
-  void _controller;
+function json(res: HttpRes, code: number, payload: unknown): void {
+  res.writeHead(code, { 'content-type': 'application/json; charset=utf-8' });
+  res.end(JSON.stringify(payload));
 }
