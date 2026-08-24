@@ -1,6 +1,8 @@
-// client/PdfView.ts — renders the PDF page in the browser via pdf.js (loaded at runtime
-// from the host /bilingual-reader/pdf.mjs) + pdf.js's native TextLayer, so text on the
-// page is selectable with pixel-accurate positioning. Selection -> onSelect -> translate.
+// client/PdfView.ts — native PDF display via a Blob URL in an <iframe> (the SAME approach
+// the built-in better-sidebar PDF viewer uses). Guarantees pixel-perfect rendering with
+// the browser's own PDF engine. Selection/translation is done via the "文本" view
+// (window.getSelection() on extracted text), since the native renderer doesn't expose
+// its text to JS. onSelect is kept for the text-view path (unused here).
 export interface PdfViewProps { file: string; onSelect: (text: string) => void }
 
 interface ReactPieces {
@@ -9,72 +11,37 @@ interface ReactPieces {
   useEffect: (fn: () => void | (() => void), deps?: any[]) => void;
 }
 
-const PDFJS_URL = '/bilingual-reader/pdf.mjs';
-const WORKER_URL = '/bilingual-reader/pdf.worker.mjs';
-// Bypass bundler rewrite so we can import a runtime URL (pdf.js is served by the host).
-const dynImport = new Function('u', 'return import(u)');
-
 export function makePdfView({ h, useState, useEffect }: ReactPieces) {
   return function PdfView(props: PdfViewProps): any {
-    const { file, onSelect } = props;
-    const [page, setPage] = useState(1);
+    const { file } = props;
+    const [url, setUrl] = useState('');
     const [err, setErr] = useState('');
-    const [hostNode, setHostNode] = useState(null);
 
     useEffect(() => {
-      if (!hostNode) return;
+      let objectUrl: string | undefined;
       let alive = true;
+      setErr('');
+      setUrl('');
       (async () => {
         try {
-          const pdfjsLib: any = await dynImport(PDFJS_URL);
-          pdfjsLib.GlobalWorkerOptions.workerSrc = WORKER_URL;
           const res = await fetch('/bilingual-reader/file?path=' + encodeURIComponent(file));
+          if (!res.ok) throw new Error('HTTP ' + res.status);
           const bytes = await res.arrayBuffer();
-          const doc = await pdfjsLib.getDocument({
-            data: new Uint8Array(bytes),
-            cMapUrl: '/bilingual-reader/cmaps/',
-            cMapPacked: true,
-            standardFontDataUrl: '/bilingual-reader/standard_fonts/',
-          }).promise;
-          const pg = await doc.getPage(page);
-          const viewport = pg.getViewport({ scale: 1.6 });
           if (!alive) return;
-          hostNode.innerHTML = '';
-          const canvas = document.createElement('canvas');
-          canvas.width = viewport.width;
-          canvas.height = viewport.height;
-          const cctx = canvas.getContext('2d') as any;
-          await pg.render({ canvasContext: cctx, viewport }).promise;
-          const textDiv = document.createElement('div');
-          textDiv.style.cssText = `position:absolute;top:0;left:0;width:${viewport.width}px;height:${viewport.height}px;`;
-          textDiv.style.setProperty('--scale-factor', String(viewport.scale));
-          const tl = new pdfjsLib.TextLayer({ textContentSource: pg.streamTextContent(), container: textDiv, viewport });
-          await tl.render();
-          const wrapper = document.createElement('div');
-          wrapper.style.cssText = `position:relative;max-width:100%;overflow:auto;`;
-          wrapper.appendChild(canvas);
-          wrapper.appendChild(textDiv);
-          hostNode.appendChild(wrapper);
-          setErr('');
+          objectUrl = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+          setUrl(objectUrl);
         } catch (e) {
           if (alive) setErr(e instanceof Error ? e.message : String(e));
         }
       })();
-      return () => { alive = false; };
-    }, [hostNode, page, file]);
+      return () => { alive = false; if (objectUrl) URL.revokeObjectURL(objectUrl); };
+    }, [file]);
 
-    return h('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 } },
-      h('div', { style: { display: 'flex', gap: 6, alignItems: 'center' } },
-        h('button', { onClick: () => setPage(Math.max(1, page - 1)), disabled: page <= 1 }, '上一页'),
-        h('span', undefined, '第 ' + page + ' 页'),
-        h('button', { onClick: () => setPage(page + 1) }, '下一页'),
-      ),
+    return h('div', { style: { display: 'flex', flexDirection: 'column', gap: 6 } },
       err ? h('p', { style: { color: '#e53e3e', padding: 12 } }, '加载失败：' + err) : undefined,
-      h('div', {
-        ref: (n: any) => setHostNode(n),
-        style: { minHeight: 200, width: '100%' },
-        onMouseUp: (e: any) => { const s = window.getSelection(); const t = s ? String(s) : ''; if (t.trim()) onSelect(t.trim()); },
-      }),
+      url
+        ? h('iframe', { src: url, title: 'PDF', style: { width: '100%', height: '620px', border: 0 } })
+        : h('p', { style: { color: '#a0aec0', padding: 12 } }, '加载 PDF…'),
     );
   };
 }
