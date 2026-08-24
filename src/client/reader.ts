@@ -2,6 +2,7 @@
 // React pieces injected by the client factory (classic-script bundle, react via factory require).
 import type { DocChunk, DocumentText, TranslateEvent, TranslateRequest } from '../types.js';
 import { buildSelectionContext } from './context.js';
+import { makePdfView } from './PdfView.js';
 
 export interface ReaderController {
   loadDocument: (file: string) => Promise<{ text: DocumentText; chunks: DocChunk[]; glossary: Record<string, string> }>;
@@ -17,6 +18,7 @@ interface ReactPieces {
 }
 
 export function makeReader({ h, useState, useEffect, useCallback }: ReactPieces) {
+  const PdfView = makePdfView({ h, useState, useEffect });
   return function BilingualReader(props: { file?: string; controller?: ReaderController }): any {
     const { file = '', controller } = props as { file?: string; controller?: ReaderController };
     const [chunks, setChunks] = useState([]);
@@ -112,7 +114,7 @@ export function makeReader({ h, useState, useEffect, useCallback }: ReactPieces)
         h('button', { onClick: () => void translateAll(), disabled: !chunks.length }, '翻译全文'),
       ),
       view === 'pdf'
-        ? h('iframe', { src: `/bilingual-reader/file?path=${encodeURIComponent(file)}`, style: { width: '100%', height: 'calc(100% - 40px)', border: 0 } })
+        ? h(PdfView, { file, onSelect })
         : chunks.map((c: DocChunk) =>
             h('section', { key: c.id, style: { marginBottom: 10 } },
               c.heading ? h('h3', { style: { fontWeight: 600 } }, c.heading) : undefined,

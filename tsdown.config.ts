@@ -17,7 +17,7 @@ export default defineConfig([
     platform: 'node',
     clean: true,
     dts: false,
-    deps: { neverBundle: ['pdfjs-dist', '@deepseek-ai/dsh-llm'] },
+    deps: { neverBundle: ['pdfjs-dist', 'pdfjs-dist/legacy/build/pdf.mjs', '@deepseek-ai/dsh-llm', '@napi-rs/canvas'] },
   },
   {
     name: 'client',

@@ -45,7 +45,8 @@
     }
   },
   "dependencies": {
-    "pdfjs-dist": "^4.7.76"
+    "pdfjs-dist": "^4.7.76",
+    "@napi-rs/canvas": "^0.1.65"
   },
   "peerDependencies": {
     "react": "^18.2.0"

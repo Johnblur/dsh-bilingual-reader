@@ -4,6 +4,7 @@
 // (never appends to the main conversation).
 import { promises as fs } from 'node:fs';
 import { extractPdf } from './host/pdf.js';
+import { renderPage } from './host/pdfRender.js';
 import { chunkDocument } from './host/chunk.js';
 import { extractGlossary } from './host/glossary.js';
 import { createLlmGateway, type LlmGateway } from './host/llmClient.js';
@@ -35,6 +36,14 @@ export function apply(ctx: { llm: unknown; webServer: unknown }): void {
         res.writeHead(200, { 'content-type': 'application/pdf', 'cache-control': 'no-cache' });
         res.end(data);
         return;
+      }
+      // Render one page to a PNG + its text-layer coordinates (same viewport => aligned).
+      if (pathname === '/bilingual-reader/page' && req.method === 'GET') {
+        const file = decodeURIComponent(u.searchParams.get('path') || '');
+        const page = parseInt(u.searchParams.get('page') || '1', 10) || 1;
+        const scale = parseFloat(u.searchParams.get('scale') || '2') || 2;
+        const rendered = await renderPage(file, page, scale);
+        return json(res, 200, rendered);
       }
       const body = await readJson(req);
       if (pathname === '/bilingual-reader/extract' && req.method === 'POST') {
