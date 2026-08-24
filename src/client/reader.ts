@@ -82,7 +82,13 @@ export function makeReader({ h, useState, useEffect, useCallback }: ReactPieces)
       const rect = container.getBoundingClientRect();
       const div = e.currentTarget;
       document.body.style.userSelect = 'none';
-      const mm = (ev: any) => { ev.preventDefault(); setTopPct(Math.max(8, Math.min(92, ((ev.clientY - rect.top) / rect.height) * 100))); };
+      const startY = e.clientY;
+      const startPct = topPct;
+      const mm = (ev: any) => {
+        ev.preventDefault();
+        const dy = ev.clientY - startY;
+        setTopPct(Math.max(8, Math.min(92, startPct + (dy / rect.height) * 100)));
+      };
       const done = () => {
         document.body.style.userSelect = '';
         window.removeEventListener('mousemove', mm);
