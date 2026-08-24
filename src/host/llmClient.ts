@@ -1,8 +1,10 @@
 // host/llmClient.ts — thin adapter over DSH's `ctx.llm` (LlmRuntime).
-// ISOLATION: this is the only place that touches the model; it runs a STANDALONE
-// prepareCall/stream and never appends to the main conversation.
+// ISOLATION: the only place that touches the model; a STANDALONE stream call that
+// never appends to the main conversation.
 // Messages are built with dsh-llm's own creators (frozen messages with content
-// blocks + source), which the adapter requires.
+// blocks + source), which the adapter requires. We use ctx.llm.stream() directly
+// (it resolves provider/model internally), NOT prepareCall (whose config-binding
+// is what caused "prepared LLM call config changed before adapter dispatch").
 import { createUserMessage, createAssistantMessage } from '@deepseek-ai/dsh-llm';
 import type { TranslateEvent } from '../types.js';
 
@@ -23,12 +25,11 @@ export function createLlmGateway(llm: unknown): LlmGateway {
   return {
     async streamText(opts) {
       const runtime = llm as {
-        prepareCall: (cfg: { provider: string; model: string; signal?: AbortSignal }) => Promise<{
-          stream: (o: { messages: unknown[]; signal?: AbortSignal }) => AsyncIterable<unknown>;
-        }>;
+        stream: (o: { provider: string; model: string; messages: unknown[]; signal?: AbortSignal }) => AsyncIterable<unknown>;
       };
-      const prepared = await runtime.prepareCall({ provider: opts.provider, model: opts.model, signal: opts.signal });
-      const stream = prepared.stream({
+      const stream = runtime.stream({
+        provider: opts.provider,
+        model: opts.model,
         signal: opts.signal,
         messages: opts.messages.map((m) =>
           m.role === 'assistant'

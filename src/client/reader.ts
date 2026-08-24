@@ -1,10 +1,5 @@
-// src/client/reader.ts — bilingual reader + translation pane as a hyperscript factory.
-// React pieces (h/useState/useEffect) are injected by the client factory, so this
-// module has NO top-level `import ... from 'react'` — required by DSH's client
-// bundle (classic script; react comes from the __ModuleLoader__ factory's require).
-//
-// Injected React pieces are typed `any` on purpose: this is client render glue, and
-// DSH-provided React's precise generic types create more friction than they resolve.
+// src/client/reader.ts — bilingual reader: 上方原文 / 下方译文, 中间可拖动分割线.
+// React pieces injected by the client factory (classic-script bundle, react via factory require).
 import type { DocChunk, DocumentText, TranslateEvent, TranslateRequest } from '../types.js';
 import { buildSelectionContext } from './context.js';
 
@@ -27,11 +22,11 @@ export function makeReader({ h, useState, useEffect, useCallback }: ReactPieces)
     const [chunks, setChunks] = useState([]);
     const [doc, setDoc] = useState(null);
     const [glossary, setGloss] = useState({});
-    const [mode, setMode] = useState('both');
     const [tr, setTr] = useState({});
     const [busy, setBusy] = useState({});
     const [sel, setSel] = useState(null);
     const [selResult, setSelResult] = useState('');
+    const [topPct, setTopPct] = useState(45);
 
     const push = useCallback((e: TranslateEvent) => {
       if (e.type === 'delta') setTr((s: Record<string, string>) => ({ ...s, [e.requestId]: (s[e.requestId] ?? '') + e.text }));
@@ -43,22 +38,26 @@ export function makeReader({ h, useState, useEffect, useCallback }: ReactPieces)
       if (!controller || !file) return;
       const { text, chunks, glossary } = await controller.loadDocument(file);
       setDoc(text); setChunks(chunks); setGloss(glossary);
-      if (chunks[0]) {
-        setBusy((b: Record<string, boolean>) => ({ ...b, [chunks[0].id]: true }));
-        try {
-          await controller.translateChunk(chunks[0].id, glossary, new AbortController().signal, (e) => {
-            push(e);
-            if (e.type === 'done' || e.type === 'error') setBusy((b: Record<string, boolean>) => ({ ...b, [chunks[0].id]: false }));
-          });
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          push({ type: 'error', requestId: chunks[0].id, message: msg });
-          setBusy((b: Record<string, boolean>) => ({ ...b, [chunks[0].id]: false }));
-        }
-      }
-    }, [controller, file, push]);
+    }, [controller, file]);
 
     useEffect(() => { void load(); }, [load]);
+
+    async function translateAll(): Promise<void> {
+      if (!controller) return;
+      for (const c of chunks) {
+        if (tr[c.id]) continue;
+        setBusy((b: Record<string, boolean>) => ({ ...b, [c.id]: true }));
+        try {
+          await controller.translateChunk(c.id, glossary, new AbortController().signal, (e) => {
+            push(e);
+            if (e.type === 'done' || e.type === 'error') setBusy((b: Record<string, boolean>) => ({ ...b, [c.id]: false }));
+          });
+        } catch (err) {
+          push({ type: 'error', requestId: c.id, message: err instanceof Error ? err.message : String(err) });
+          setBusy((b: Record<string, boolean>) => ({ ...b, [c.id]: false }));
+        }
+      }
+    }
 
     async function onSelect(text: string): Promise<void> {
       if (!text || !doc) return;
@@ -68,49 +67,61 @@ export function makeReader({ h, useState, useEffect, useCallback }: ReactPieces)
       try {
         const res = await controller.translateSelection(
           { kind: 'selection', selection: ctx.selection, context: ctx.context, glossary, target: '中文' },
-          new AbortController().signal,
-          push,
+          new AbortController().signal, push,
         );
         setSelResult(res);
       } catch (err) {
-        setSelResult((err instanceof Error ? err.message : String(err)));
+        setSelResult(err instanceof Error ? err.message : String(err));
       }
     }
 
-    const modeButtons = (['original', 'both', 'translation'] as const).map((m) =>
-      h('button', { key: m, onClick: () => setMode(m), style: { marginLeft: 4 } }, m),
-    );
+    function onDividerDown(e: any): void {
+      const container = e.currentTarget.parentElement;
+      const rect = container.getBoundingClientRect();
+      const mm = (ev: any) => { setTopPct(Math.max(8, Math.min(92, ((ev.clientY - rect.top) / rect.height) * 100))); };
+      const mu = () => { window.removeEventListener('mousemove', mm); window.removeEventListener('mouseup', mu); };
+      window.addEventListener('mousemove', mm);
+      window.addEventListener('mouseup', mu);
+    }
 
-    const sections = chunks.map((c: DocChunk) =>
-      h('section', { key: c.id, style: { marginBottom: 8 } },
-        c.heading ? h('h3', { style: { fontWeight: 600 } }, c.heading) : undefined,
-        mode !== 'translation'
-          ? h('div', { onMouseUp: (e: unknown) => { const s = window.getSelection(); const t = s ? String(s) : ''; if (t.trim()) void onSelect(t.trim()); } },
-              (c.text || '').split(/\n{2,}/).map((p, i) => h('p', { key: i, style: { lineHeight: 1.6 } }, p)))
-          : undefined,
-        mode !== 'original'
-          ? h('div', { style: { color: '#2b6cb0' } }, tr[c.id] || (busy[c.id] ? '翻译中…' : '—'))
-          : undefined,
+    const originalPane = h('div', { style: { height: `${topPct}%`, overflow: 'auto', padding: 16 } },
+      h('div', { style: { position: 'sticky', top: 0, paddingBottom: 8, background: '#fff' } },
+        h('button', { onClick: () => void translateAll(), disabled: !chunks.length }, '翻译全文'),
+      ),
+      chunks.map((c: DocChunk) =>
+        h('section', { key: c.id, style: { marginBottom: 10 } },
+          c.heading ? h('h3', { style: { fontWeight: 600 } }, c.heading) : undefined,
+          h('div', { onMouseUp: (e: any) => { const s = window.getSelection(); const t = s ? String(s) : ''; if (t.trim()) void onSelect(t.trim()); } },
+            (c.text || '').split(/\n{2,}/).map((p: string, i: number) => h('p', { key: i, style: { lineHeight: 1.6 } }, p))),
+        ),
       ),
     );
 
-    const pane = h('aside', { style: { width: 360, borderLeft: '1px solid #e2e8f0', padding: 12 } },
-      h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
-        h('strong', undefined, '划词翻译'),
-        h('button', { disabled: !selResult, onClick: () => { if (selResult) void navigator.clipboard.writeText(selResult); } }, '复制译文'),
-      ),
+    const divider = h('div', { onMouseDown: onDividerDown, style: { height: 8, cursor: 'row-resize', background: '#e2e8f0', flex: 'none' } });
+
+    const translationPane = h('div', { style: { flex: 1, overflow: 'auto', padding: 16, borderTop: '1px solid #e2e8f0' } },
       sel
-        ? h('p', { style: { color: '#718096', marginTop: 8 } }, '译文（已用上下文理解词义）：')
-        : h('p', { style: { color: '#a0aec0', marginTop: 8 } }, '选中文字后，译文会显示在这里。'),
-      h('div', { style: { marginTop: 8, lineHeight: 1.7 } }, selResult || ''),
+        ? h('div', {},
+            h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
+              h('strong', undefined, '译文'),
+              h('button', { disabled: !selResult, onClick: () => { if (selResult) void navigator.clipboard.writeText(selResult); } }, '复制译文'),
+            ),
+            h('div', { style: { marginTop: 6, lineHeight: 1.7 } }, selResult || '翻译中…'),
+          )
+        : h('div', {},
+            h('strong', undefined, '译文'),
+            chunks.filter((c: DocChunk) => tr[c.id]).length
+              ? chunks.filter((c: DocChunk) => tr[c.id]).map((c: DocChunk) =>
+                  h('div', { key: c.id, style: { marginBottom: 8 } },
+                    c.heading ? h('small', { style: { color: '#718096' } }, c.heading) : undefined,
+                    h('p', { style: { lineHeight: 1.7 } }, tr[c.id])),
+                )
+              : h('p', { style: { color: '#a0aec0' } }, '点「翻译全文」或选中原文里的词，译到这里。'),
+          ),
     );
 
-    return h('div', { style: { display: 'flex', height: '100%' } },
-      h('div', { style: { flex: 1, overflow: 'auto' } },
-        h('div', { style: { padding: 8 } }, h('span', undefined, '显示：'), ...modeButtons),
-        h('div', { style: { display: 'flex', flexDirection: 'column', gap: 12, padding: 16 } }, ...sections),
-      ),
-      pane,
+    return h('div', { style: { display: 'flex', flexDirection: 'column', height: '100%' } },
+      originalPane, divider, translationPane,
     );
   };
 }
