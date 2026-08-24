@@ -53,6 +53,16 @@ export function apply(ctx: { llm: unknown; webServer: unknown }): void {
         res.end(data);
         return;
       }
+      // Read the OS clipboard (Electron only; falls back to empty on web). Lets us
+      // auto-translate as soon as the user copies a selection from the native PDF viewer.
+      if (pathname === '/bilingual-reader/clipboard' && req.method === 'GET') {
+        let text = '';
+        try {
+          const electron = nodeRequire('electron') as any;
+          text = (electron?.clipboard?.readText?.() ?? '');
+        } catch { text = ''; }
+        return json(res, 200, { text });
+      }
       // Serve pdf.js's browser build + worker so the client can import them at runtime
       // (avoids bundling pdf.js into the __ModuleLoader__ client, and no native canvas).
       if (pathname === '/bilingual-reader/pdf.mjs' && req.method === 'GET') {

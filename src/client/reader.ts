@@ -37,33 +37,53 @@ export function makeReader({ h, useState, useEffect, useCallback }: ReactPieces)
 
     const normalize = (s: string) => s.replace(/\s+/g, ' ').trim();
 
+    async function doTranslate(copied: string): Promise<void> {
+      if (!copied) { setSelResult('（剪贴板为空：请先在 PDF 里选中并复制）'); return; }
+      if (!doc) { setSelResult('（文档未加载）'); return; }
+      const selText = normalize(copied).slice(0, 1500);
+      const normDoc = normalize(doc.fullText);
+      let context = '';
+      const hits: number[] = [];
+      let i = normDoc.indexOf(selText);
+      while (i >= 0) { hits.push(i); i = normDoc.indexOf(selText, i + 1); }
+      if (hits.length === 1) {
+        const idx = hits[0];
+        context = normDoc.slice(Math.max(0, idx - contextLen), idx + selText.length + contextLen);
+      }
+      setSel({ selection: selText, context });
+      setSelResult('');
+      if (!controller) return;
+      const res = await controller.translateSelection(
+        { kind: 'selection', selection: selText, context, glossary, target: '中文' },
+        new AbortController().signal, () => {},
+      );
+      setSelResult(res);
+    }
+
     async function onClipboardTranslate(): Promise<void> {
       try {
-        const copied = await navigator.clipboard.readText();
-        if (!copied) { setSelResult('（剪贴板为空：请先在 PDF 里选中并复制）'); return; }
-        if (!doc) { setSelResult('（文档未加载）'); return; }
-        const selText = normalize(copied).slice(0, 1500);
-        const normDoc = normalize(doc.fullText);
-        let context = '';
-        const hits: number[] = [];
-        let i = normDoc.indexOf(selText);
-        while (i >= 0) { hits.push(i); i = normDoc.indexOf(selText, i + 1); }
-        if (hits.length === 1) {
-          const idx = hits[0];
-          context = normDoc.slice(Math.max(0, idx - contextLen), idx + selText.length + contextLen);
-        }
-        setSel({ selection: selText, context });
-        setSelResult('');
-        if (!controller) return;
-        const res = await controller.translateSelection(
-          { kind: 'selection', selection: selText, context, glossary, target: '中文' },
-          new AbortController().signal, () => {},
-        );
-        setSelResult(res);
+        await doTranslate(await navigator.clipboard.readText());
       } catch (err) {
         setSelResult('读取剪贴板失败：' + (err instanceof Error ? err.message : String(err)));
       }
     }
+
+    // Electron-only: poll the host clipboard route; when the system clipboard changes,
+    // auto-translate. Falls back to the button on web.
+    useEffect(() => {
+      let last = '';
+      const poll = async () => {
+        try {
+          const r = await fetch('/bilingual-reader/clipboard');
+          const j = await r.json();
+          const text = j && typeof j.text === 'string' ? j.text : '';
+          if (text && text !== last) { last = text; await doTranslate(text); }
+          else if (!text) last = '';
+        } catch { /* ignore */ }
+      };
+      const id = setInterval(poll, 400);
+      return () => clearInterval(id);
+    }, [doc, glossary, controller, contextLen]);
 
     function onDividerDown(e: any): void {
       e.preventDefault();
@@ -102,8 +122,13 @@ export function makeReader({ h, useState, useEffect, useCallback }: ReactPieces)
         h('input', { type: 'range', min: 0, max: 800, step: 50, value: contextLen, onChange: (e: any) => setContextLen(Number(e.target.value)), style: { width: 160 } }),
         h('span', undefined, contextLen + ' 字'),
       ),
-      h('div', { style: { marginTop: 10, lineHeight: 1.7 } },
-        sel ? (selResult || '翻译中…') : '在 PDF 里选中一段文字并复制，然后点「翻译选中」。',
+      h('div', { style: { marginTop: 10 } },
+        sel
+          ? h('div', {},
+              h('div', { style: { color: '#718096', fontSize: 13, marginBottom: 6, maxHeight: 130, overflow: 'auto' } }, '原文：' + sel.selection),
+              h('div', { style: { lineHeight: 1.7 } }, selResult || '翻译中…'),
+            )
+          : h('p', { style: { color: '#a0aec0', marginTop: 4 } }, '在 PDF 里选中一段文字并复制，即可自动翻译（或点「翻译选中」）。'),
       ),
     );
 
