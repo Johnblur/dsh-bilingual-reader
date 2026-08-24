@@ -78,6 +78,34 @@ export function makeReader({ h, useState, useEffect, useCallback }: ReactPieces)
       }
     }
 
+    const normalize = (s: string) => s.replace(/\s+/g, ' ').trim();
+
+    // Read the OS clipboard (the user copied a selection from the native PDF viewer),
+    // match it against the extracted text (whitespace-normalized) to recover context,
+    // then translate. The extracted text is only used for matching/context, not shown.
+    async function onClipboardTranslate(): Promise<void> {
+      try {
+        const copied = await navigator.clipboard.readText();
+        if (!copied) { setSelResult('（剪贴板为空，请先在 PDF 里选中并复制）'); return; }
+        if (!doc) { setSelResult('（文档未加载）'); return; }
+        const sel = normalize(copied).slice(0, 1500);
+        const normDoc = normalize(doc.fullText);
+        let context = '';
+        const idx = normDoc.indexOf(sel);
+        if (idx >= 0) context = normDoc.slice(Math.max(0, idx - 250), idx + sel.length + 250);
+        setSel({ selection: sel, context });
+        setSelResult('');
+        if (!controller) return;
+        const res = await controller.translateSelection(
+          { kind: 'selection', selection: sel, context, glossary, target: '中文' },
+          new AbortController().signal, push,
+        );
+        setSelResult(res);
+      } catch (err) {
+        setSelResult('读取剪贴板失败：' + (err instanceof Error ? err.message : String(err)));
+      }
+    }
+
     function onDividerDown(e: any): void {
       e.preventDefault();
       const container = e.currentTarget.parentElement;
@@ -112,6 +140,7 @@ export function makeReader({ h, useState, useEffect, useCallback }: ReactPieces)
         h('button', { onClick: () => setView('pdf'), style: { fontWeight: view === 'pdf' ? 700 : 400 } }, 'PDF'),
         h('button', { onClick: () => setView('text'), style: { fontWeight: view === 'text' ? 700 : 400 } }, '文本'),
         h('button', { onClick: () => void translateAll(), disabled: !chunks.length }, '翻译全文'),
+        h('button', { onClick: () => void onClipboardTranslate() }, '翻译选中(PDF复制后)'),
       ),
       view === 'pdf'
         ? h(PdfView, { file, onSelect })
