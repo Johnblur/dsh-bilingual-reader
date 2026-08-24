@@ -3,8 +3,8 @@
 // translate. Translation runs through the injected `llm` service in an ISOLATED call
 // (never appends to the main conversation).
 import { promises as fs } from 'node:fs';
+import { createRequire } from 'node:module';
 import { extractPdf } from './host/pdf.js';
-import { renderPage } from './host/pdfRender.js';
 import { chunkDocument } from './host/chunk.js';
 import { extractGlossary } from './host/glossary.js';
 import { createLlmGateway, type LlmGateway } from './host/llmClient.js';
@@ -19,6 +19,7 @@ interface HttpRes { writeHead: (code: number, headers?: Record<string, string>) 
 
 export function apply(ctx: { llm: unknown; webServer: unknown }): void {
   const gateway: LlmGateway = createLlmGateway(ctx.llm);
+  const nodeRequire = createRequire(import.meta.url);
   const ws = ctx.webServer as { register: (r: { kind: string; path: string; handler: (req: HttpReq, res: HttpRes) => void }) => void };
 
   // single-document state (extract populates chunks; translate-chunk looks them up)
@@ -37,13 +38,19 @@ export function apply(ctx: { llm: unknown; webServer: unknown }): void {
         res.end(data);
         return;
       }
-      // Render one page to a PNG + its text-layer coordinates (same viewport => aligned).
-      if (pathname === '/bilingual-reader/page' && req.method === 'GET') {
-        const file = decodeURIComponent(u.searchParams.get('path') || '');
-        const page = parseInt(u.searchParams.get('page') || '1', 10) || 1;
-        const scale = parseFloat(u.searchParams.get('scale') || '2') || 2;
-        const rendered = await renderPage(file, page, scale);
-        return json(res, 200, rendered);
+      // Serve pdf.js's browser build + worker so the client can import them at runtime
+      // (avoids bundling pdf.js into the __ModuleLoader__ client, and no native canvas).
+      if (pathname === '/bilingual-reader/pdf.mjs' && req.method === 'GET') {
+        const p = nodeRequire.resolve('pdfjs-dist/build/pdf.mjs');
+        res.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-cache' });
+        res.end(await fs.readFile(p));
+        return;
+      }
+      if (pathname === '/bilingual-reader/pdf.worker.mjs' && req.method === 'GET') {
+        const p = nodeRequire.resolve('pdfjs-dist/build/pdf.worker.mjs');
+        res.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-cache' });
+        res.end(await fs.readFile(p));
+        return;
       }
       const body = await readJson(req);
       if (pathname === '/bilingual-reader/extract' && req.method === 'POST') {
