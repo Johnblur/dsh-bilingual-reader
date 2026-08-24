@@ -38,8 +38,8 @@ export function makePdfView({ h, useState, useEffect }: ReactPieces) {
       h('span', {
         key: i,
         style: {
-          position: 'absolute', left: it.x, top: it.y, fontSize: it.fontSize,
-          whiteSpace: 'pre', color: 'transparent', lineHeight: 1,
+          position: 'absolute', left: it.x + 'px', top: it.y + 'px', fontSize: it.fontSize + 'px',
+          transformOrigin: 'left top', whiteSpace: 'pre', color: 'transparent',
         },
       }, it.text),
     ));

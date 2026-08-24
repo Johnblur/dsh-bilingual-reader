@@ -40,10 +40,12 @@ export async function renderPage(file: string, pageNum: number, scale: number): 
     .filter((i: any) => i && typeof i.str === 'string' && i.str.length > 0)
     .map((i: any) => {
       const t = transform(viewport.transform as number[], i.transform as number[]);
+      // pdf.js text layer: font size = the scale carried in the transformed matrix.
+      const fs = Math.hypot(t[2], t[3]) || Math.round(i.height || 10);
       return {
         x: Math.round(t[4]),
         y: Math.round(t[5]),
-        fontSize: Math.round((i.height as number) || 10),
+        fontSize: Math.round(fs),
         text: i.str,
       };
     });
