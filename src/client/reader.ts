@@ -26,6 +26,7 @@ export function makeReader({ h, useState, useEffect, useCallback }: ReactPieces)
     const [selResult, setSelResult] = useState('');
     const [topPct, setTopPct] = useState(52);
     const [contextLen, setContextLen] = useState(250);
+    const [clipAvailable, setClipAvailable] = useState(false);
 
     const load = useCallback(async () => {
       if (!controller || !file) return;
@@ -77,6 +78,7 @@ export function makeReader({ h, useState, useEffect, useCallback }: ReactPieces)
         try {
           const r = await fetch('/bilingual-reader/clipboard');
           const j = await r.json();
+          setClipAvailable(!!j.available);
           const text = j && typeof j.text === 'string' ? j.text : '';
           if (text && text !== last) { last = text; await doTranslate(text); }
           else if (!text) last = '';
@@ -118,7 +120,9 @@ export function makeReader({ h, useState, useEffect, useCallback }: ReactPieces)
 
     const bottom = h('div', { style: { flex: 1, overflow: 'auto', padding: 12, borderTop: '1px solid #e2e8f0' } },
       h('div', { style: { display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' } },
-        h('button', { onClick: () => void onClipboardTranslate() }, '翻译选中（在 PDF 里复制后）'),
+        clipAvailable
+          ? h('span', { style: { color: '#48bb78', fontWeight: 600 } }, '✓ 已启用自动翻译')
+          : h('button', { onClick: () => void onClipboardTranslate() }, '翻译选中（在 PDF 里复制后）'),
         h('label', undefined, '上下文'),
         h('input', { type: 'range', min: 0, max: 800, step: 50, value: contextLen, onChange: (e: any) => setContextLen(Number(e.target.value)), style: { width: 160 } }),
         h('span', undefined, contextLen + ' 字'),
