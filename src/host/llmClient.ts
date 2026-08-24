@@ -1,12 +1,9 @@
 // host/llmClient.ts — thin adapter over DSH's `ctx.llm` (LlmRuntime).
-// IMPORTANT (isolation): this is the ONLY place that touches the model, and it
-// runs a STANDALONE call via prepareCall/stream — it never appends to the main
-// conversation, so the main thread's context is untouched by design.
-//
-// VERIFY on your DSH build: the exact `messages` shape and the chunk (delta)
-// shape below are written against the dsh-llm surface we inspected
-// (`ctx.llm.prepareCall(config) -> { stream({messages, signal}) }`, token deltas).
-// Adjust `buildMessages` / the delta picker to match your installed dsh-llm types.
+// ISOLATION: this is the only place that touches the model; it runs a STANDALONE
+// prepareCall/stream and never appends to the main conversation.
+// Messages are built with dsh-llm's own creators (frozen messages with content
+// blocks + source), which the adapter requires.
+import { createUserMessage, createAssistantMessage } from '@deepseek-ai/dsh-llm';
 import type { TranslateEvent } from '../types.js';
 
 export interface LlmMessage { role: 'system' | 'user' | 'assistant'; text: string }
@@ -25,8 +22,6 @@ export interface LlmGateway {
 export function createLlmGateway(llm: unknown): LlmGateway {
   return {
     async streamText(opts) {
-      // dsh-llm LlmRuntime: prepareCall binds provider/model for a one-shot call.
-      // TODO(verify): imports/helpers from '@deepseek-ai/dsh-llm' for message creation.
       const runtime = llm as {
         prepareCall: (cfg: { provider: string; model: string; signal?: AbortSignal }) => Promise<{
           stream: (o: { messages: unknown[]; signal?: AbortSignal }) => AsyncIterable<unknown>;
@@ -35,14 +30,17 @@ export function createLlmGateway(llm: unknown): LlmGateway {
       const prepared = await runtime.prepareCall({ provider: opts.provider, model: opts.model, signal: opts.signal });
       const stream = prepared.stream({
         signal: opts.signal,
-        messages: opts.messages.map((m) => ({ role: m.role, content: [{ type: 'text', text: m.text }] })),
+        messages: opts.messages.map((m) =>
+          m.role === 'assistant'
+            ? createAssistantMessage({ content: [{ type: 'text', text: m.text }], source: { provider: opts.provider, model: opts.model } })
+            : createUserMessage({ content: [{ type: 'text', text: m.text }] }),
+        ),
       });
       let full = '';
       for await (const chunk of stream) {
-        // Adapt raw chunk -> text delta. Confirm the chunk shape in dsh-llm.
-        const delta = (chunk as { text?: string; delta?: string }).text
-          ?? (chunk as { delta?: string }).delta ?? '';
-        if (typeof delta === 'string' && delta.length) {
+        const c = chunk as { text?: string; delta?: string };
+        const delta = typeof c?.text === 'string' ? c.text : (typeof c?.delta === 'string' ? c.delta : '');
+        if (delta) {
           full += delta;
           opts.emit({ type: 'delta', requestId: opts.requestId, text: delta });
         }

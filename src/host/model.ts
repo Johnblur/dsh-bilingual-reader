@@ -1,18 +1,21 @@
 // host/model.ts — per-mode model routing.
-// Pure logic: pick a provider/model per translation kind, with per-request override.
+// Uses your DSH-configured model by default (provider 'deepseek-official', model
+// 'deepseek-v4-flash-vision-exp'); overridable via env or per-request.
 import type { TranslateRequest } from '../types.js';
 
 export interface ModelTarget { provider: string; model: string }
 
 export interface ModelConfig {
-  fullText: ModelTarget;     // strong / high quality
-  selection: ModelTarget;    // fast / cheap
+  fullText: ModelTarget;
+  selection: ModelTarget;
 }
 
-// Follows DSH's configured deepseek models by default; overridable via plugin settings.
+const PROVIDER = process.env.DSH_BILINGUAL_PROVIDER ?? 'deepseek-official';
+const MODEL = process.env.DSH_BILINGUAL_MODEL ?? 'deepseek-v4-flash-vision-exp';
+
 export const DEFAULT_MODELS: ModelConfig = {
-  fullText: { provider: 'deepseek', model: 'deepseek-ai/DeepSeek-V3.2' },
-  selection: { provider: 'deepseek', model: 'deepseek-ai/DeepSeek-V4-Flash' },
+  fullText: { provider: PROVIDER, model: MODEL },
+  selection: { provider: PROVIDER, model: MODEL },
 };
 
 export function resolveModel(req: TranslateRequest, cfg: ModelConfig = DEFAULT_MODELS): ModelTarget {

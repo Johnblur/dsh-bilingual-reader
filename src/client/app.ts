@@ -31,7 +31,8 @@ export function makeClientFactory(): (require: (m: string) => unknown) => { inje
       },
       translateSelection: async (req: any, _signal: AbortSignal, _emit: (e: any) => void) => {
         const r = await post('/bilingual-reader/translate-selection', req);
-        return (r && r.text) || '';
+        if (r && typeof r.text === 'string') return r.text;
+        throw new Error((r && r.error) || ('translate-selection failed: ' + JSON.stringify(r)));
       },
     };
 

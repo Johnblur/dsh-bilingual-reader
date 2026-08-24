@@ -45,10 +45,16 @@ export function makeReader({ h, useState, useEffect, useCallback }: ReactPieces)
       setDoc(text); setChunks(chunks); setGloss(glossary);
       if (chunks[0]) {
         setBusy((b: Record<string, boolean>) => ({ ...b, [chunks[0].id]: true }));
-        await controller.translateChunk(chunks[0].id, glossary, new AbortController().signal, (e) => {
-          push(e);
-          if (e.type === 'done' || e.type === 'error') setBusy((b: Record<string, boolean>) => ({ ...b, [chunks[0].id]: false }));
-        });
+        try {
+          await controller.translateChunk(chunks[0].id, glossary, new AbortController().signal, (e) => {
+            push(e);
+            if (e.type === 'done' || e.type === 'error') setBusy((b: Record<string, boolean>) => ({ ...b, [chunks[0].id]: false }));
+          });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          push({ type: 'error', requestId: chunks[0].id, message: msg });
+          setBusy((b: Record<string, boolean>) => ({ ...b, [chunks[0].id]: false }));
+        }
       }
     }, [controller, file, push]);
 
@@ -59,12 +65,16 @@ export function makeReader({ h, useState, useEffect, useCallback }: ReactPieces)
       const ctx = buildSelectionContext(text, doc.fullText);
       setSel(ctx); setSelResult('');
       if (!controller) return;
-      const res = await controller.translateSelection(
-        { kind: 'selection', selection: ctx.selection, context: ctx.context, glossary, target: '中文' },
-        new AbortController().signal,
-        push,
-      );
-      setSelResult(res);
+      try {
+        const res = await controller.translateSelection(
+          { kind: 'selection', selection: ctx.selection, context: ctx.context, glossary, target: '中文' },
+          new AbortController().signal,
+          push,
+        );
+        setSelResult(res);
+      } catch (err) {
+        setSelResult((err instanceof Error ? err.message : String(err)));
+      }
     }
 
     const modeButtons = (['original', 'both', 'translation'] as const).map((m) =>
