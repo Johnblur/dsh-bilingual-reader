@@ -65,7 +65,7 @@ export function makeClientFactory(): (require: (m: string) => unknown) => { inje
         ),
         chosen
           ? h(BilingualReader, { file: chosen, controller })
-          : h('p', { style: { color: 'var(--dsw-alias-label-tertiary)', fontSize: 13 } }, '输入一个 PDF 路径（默认工作区目录），点「加载」开始双语阅读。'),
+          : h('p', { style: { color: 'var(--dsw-alias-label-tertiary)', fontSize: 13 } }, '输入一个 PDF 路径，点「加载」开始双语阅读。'),
       );
     }
 
@@ -79,9 +79,8 @@ export function makeClientFactory(): (require: (m: string) => unknown) => { inje
       const bs = c.betterSidebar as { registerTab: (d: unknown) => () => void } | undefined;
       if (!bs) return;
       // DSH i18n: the active locale comes from ctx.locale (same source better-sidebar's
-      // own tabs use). English UI → "translator", Chinese UI → "翻译". This is the single
-      // title field the tab bar, + menu, and settings card all render, so language-aware
-      // is the standard (规范) way and matches better-sidebar's native tabs.
+      // own tabs use). This `title` feeds the + menu and the settings card, so there we
+      // show the localized name: Chinese UI → "翻译", English UI → "translator".
       const isZh = () =>
         (c.locale?.getSnapshot?.().active ?? (typeof navigator !== 'undefined' ? navigator.language : ''))
           .toLowerCase()
@@ -91,6 +90,15 @@ export function makeClientFactory(): (require: (m: string) => unknown) => { inje
           id: 'bilingual-reader',
           title: () => (isZh() ? '翻译' : 'translator'),
           icon: (size: number) => languageIcon(h, size),
+          // Tab-BAR label. The tab bar renders the title frozen into tab.title when the
+          // tab is opened (it does NOT call title() live like the + menu does), so the
+          // user wants the tab strip to always read English "translator". We mint the
+          // tab ourselves so the stored title is a fixed English string regardless of
+          // the active UI language.
+          single: true,
+          createTab: () => ({
+            tab: { id: 'bilingual-reader', type: 'bilingual-reader', title: 'translator' },
+          }),
           component: ReaderTab,
         }),
       );
