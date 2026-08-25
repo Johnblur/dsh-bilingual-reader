@@ -1,7 +1,7 @@
 {
   "name": "dsh-bilingual-reader",
-  "version": "0.1.0",
-  "description": "DSH better-sidebar plugin: bilingual paper reading with full-text + selection translation, LLM-powered and isolated from the main conversation context.",
+  "version": "1.0.0",
+  "description": "DSH better-sidebar plugin: read paper PDFs and translate a selection with the LLM, contextual and isolated from the main conversation.",
   "type": "module",
   "main": "./lib/index.mjs",
   "types": "./lib/types/index.d.ts",
