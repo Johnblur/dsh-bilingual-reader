@@ -27,6 +27,7 @@ export function makeReader({ h, useState, useEffect, useCallback }: ReactPieces)
     const [topPct, setTopPct] = useState(52);
     const [contextLen, setContextLen] = useState(250);
     const [clipAvailable, setClipAvailable] = useState(false);
+    const [selError, setSelError] = useState(false);
 
     const load = useCallback(async () => {
       if (!controller || !file) return;
@@ -39,8 +40,8 @@ export function makeReader({ h, useState, useEffect, useCallback }: ReactPieces)
     const normalize = (s: string) => s.replace(/\s+/g, ' ').trim();
 
     async function doTranslate(copied: string): Promise<void> {
-      if (!copied) { setSelResult('（剪贴板为空：请先在 PDF 里选中并复制）'); return; }
-      if (!doc) { setSelResult('（文档未加载）'); return; }
+      if (!copied) { setSel({ selection: '', context: '' }); setSelResult('（剪贴板为空：请先在 PDF 里选中并复制）'); setSelError(true); return; }
+      if (!doc) { setSelResult('（文档未加载）'); setSelError(true); return; }
       const selText = normalize(copied).slice(0, 1500);
       const normDoc = normalize(doc.fullText);
       let context = '';
@@ -53,19 +54,23 @@ export function makeReader({ h, useState, useEffect, useCallback }: ReactPieces)
       }
       setSel({ selection: selText, context });
       setSelResult('');
-      if (!controller) return;
-      const res = await controller.translateSelection(
-        { kind: 'selection', selection: selText, context, glossary, target: '中文' },
-        new AbortController().signal, () => {},
-      );
-      setSelResult(res);
+      if (!controller) { setSelError(true); return; }
+      try {
+        const res = await controller.translateSelection(
+          { kind: 'selection', selection: selText, context, glossary, target: '中文' },
+          new AbortController().signal, () => {},
+        );
+        setSelResult(res); setSelError(false);
+      } catch (err) {
+        setSelResult('翻译失败：' + (err instanceof Error ? err.message : String(err))); setSelError(true);
+      }
     }
 
     async function onClipboardTranslate(): Promise<void> {
       try {
         await doTranslate(await navigator.clipboard.readText());
       } catch (err) {
-        setSelResult('读取剪贴板失败：' + (err instanceof Error ? err.message : String(err)));
+        setSelResult('读取剪贴板失败：' + (err instanceof Error ? err.message : String(err))); setSelError(true);
       }
     }
 
@@ -112,28 +117,33 @@ export function makeReader({ h, useState, useEffect, useCallback }: ReactPieces)
       div.addEventListener('pointerup', done);
     }
 
-    const top = h('div', { style: { height: `${topPct}%`, overflow: 'auto', padding: 8 } },
+    const btn = { border: '1px solid #d9d9d9', background: '#fafafa', color: '#1f2329', borderRadius: 6, padding: '4px 10px', fontSize: 13, cursor: 'pointer' };
+
+    const top = h('div', { style: { height: `${topPct}%`, overflow: 'hidden', display: 'flex', flexDirection: 'column' } },
       h(PdfView, { file }),
     );
 
-    const divider = h('div', { onPointerDown: onDividerDown, style: { height: 8, cursor: 'row-resize', background: '#e2e8f0', flex: 'none', userSelect: 'none', touchAction: 'none' } });
+    const divider = h('div', { onPointerDown: onDividerDown, style: { height: 8, cursor: 'row-resize', background: '#e2e2e2', flex: 'none', userSelect: 'none', touchAction: 'none' } });
 
-    const bottom = h('div', { style: { flex: 1, overflow: 'auto', padding: 12, borderTop: '1px solid #e2e8f0' } },
-      h('div', { style: { display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' } },
+    const bottom = h('div', { style: { flex: 1, overflow: 'auto', padding: 12, borderTop: '1px solid #e2e2e2', color: '#1f2329' } },
+      h('div', { style: { display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', color: '#555' } },
         clipAvailable
-          ? h('span', { style: { color: '#48bb78', fontWeight: 600 } }, '✓ 已启用自动翻译')
-          : h('button', { onClick: () => void onClipboardTranslate() }, '翻译选中（在 PDF 里复制后）'),
-        h('label', undefined, '上下文'),
+          ? h('span', { style: { fontSize: 13 } }, '✓ 已启用自动翻译')
+          : h('button', { onClick: () => void onClipboardTranslate(), style: btn }, '翻译选中'),
+        h('label', { style: { fontSize: 13, color: '#555' } }, '上下文'),
         h('input', { type: 'range', min: 0, max: 800, step: 50, value: contextLen, onChange: (e: any) => setContextLen(Number(e.target.value)), style: { width: 160 } }),
-        h('span', undefined, contextLen + ' 字'),
+        h('span', { style: { fontSize: 13, color: '#555' } }, contextLen + ' 字'),
       ),
       h('div', { style: { marginTop: 10 } },
         sel
-          ? h('div', {},
-              h('div', { style: { color: '#718096', fontSize: 13, marginBottom: 6, maxHeight: 130, overflow: 'auto' } }, '原文：' + sel.selection),
-              h('div', { style: { lineHeight: 1.7 } }, selResult || '翻译中…'),
+          ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 6 } },
+              h('div', { style: { color: '#666', fontSize: 13, maxHeight: 130, overflow: 'auto' } }, '原文：' + sel.selection),
+              h('div', { style: { display: 'flex', gap: 8, alignItems: 'flex-start' } },
+                h('div', { style: { flex: 1, lineHeight: 1.7, color: selError ? '#e53e3e' : '#1f2329' } }, selResult || '翻译中…'),
+                selResult ? h('button', { onClick: () => void navigator.clipboard.writeText(selResult), style: btn }, '复制译文') : undefined,
+              ),
             )
-          : h('p', { style: { color: '#a0aec0', marginTop: 4 } }, '在 PDF 里选中一段文字并复制，即可自动翻译（或点「翻译选中」）。'),
+          : h('p', { style: { color: '#8a8a8a', marginTop: 4, fontSize: 13 } }, '在 PDF 里选中一段文字并复制，即可自动翻译；无法自动时点「翻译选中」。'),
       ),
     );
 
