@@ -38,13 +38,11 @@ export function makeClientFactory(): (require: (m: string) => unknown) => { inje
     };
 
     function ReaderTab(props: any): any {
-      const scope = props?.scope;
-      const cwd: string = scope?.cwd ?? '';
-      const [path, setPath] = useState(cwd ? `${cwd}\\` : '');
+      const [path, setPath] = useState('');
       const [chosen, setChosen] = useState('');
       return h('div', { style: { padding: 12, display: 'flex', flexDirection: 'column', gap: 8, height: '100%' } },
         h('div', { style: { display: 'flex', gap: 8 } },
-          h('input', { value: path, placeholder: 'PDF 路径', onChange: (e: any) => setPath(e.target.value), style: { ...inputBase, flex: 1 } }),
+          h('input', { value: path, placeholder: '粘贴或输入 PDF 路径…', onChange: (e: any) => setPath(e.target.value), style: { ...inputBase, flex: 1 } }),
           h('button', { onClick: () => setChosen(path), className: BTN_CLS }, '加载'),
         ),
         chosen

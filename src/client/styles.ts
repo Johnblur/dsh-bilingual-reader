@@ -23,12 +23,12 @@ export function ensurePluginStyles(): void {
 }
 ensurePluginStyles();
 
-// Base text-input skin matching DSH's own `.browserInput` / `.editorSearchInput`
-// (hairline border + layer-1 surface + primary ink). Callers spread in width/flex.
+// Base text-input skin. Border uses the same `--dsw-alias-border-l2` as the
+// button so the input reads at the same visual weight and stays easy to see.
 export const inputBase: Record<string, string> = {
   height: '28px',
   padding: '0 10px',
-  border: '1px solid var(--dsw-alias-border-l1)',
+  border: '1px solid var(--dsw-alias-border-l2)',
   borderRadius: '6px',
   background: 'var(--dsw-alias-bg-layer-1)',
   color: 'var(--dsw-alias-label-primary)',
