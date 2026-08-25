@@ -3,6 +3,7 @@
 // calls the host /bilingual-reader/* routes (extract + isolated translate).
 // React is sourced from the factory's `require` (single DSH React instance).
 import { makeReader } from './reader.js';
+import { BTN_CLS, inputBase } from './styles.js';
 import type * as ReactNS from 'react';
 
 async function post(path: string, body: unknown): Promise<any> {
@@ -43,12 +44,12 @@ export function makeClientFactory(): (require: (m: string) => unknown) => { inje
       const [chosen, setChosen] = useState('');
       return h('div', { style: { padding: 12, display: 'flex', flexDirection: 'column', gap: 8, height: '100%' } },
         h('div', { style: { display: 'flex', gap: 8 } },
-          h('input', { value: path, onChange: (e: any) => setPath(e.target.value), style: { flex: 1 } }),
-          h('button', { onClick: () => setChosen(path) }, '加载'),
+          h('input', { value: path, placeholder: 'PDF 路径', onChange: (e: any) => setPath(e.target.value), style: { ...inputBase, flex: 1 } }),
+          h('button', { onClick: () => setChosen(path), className: BTN_CLS }, '加载'),
         ),
         chosen
           ? h(BilingualReader, { file: chosen, controller })
-          : h('p', { style: { color: '#a0aec0' } }, '输入一个 PDF 路径（默认工作区目录），点「加载」开始双语阅读。'),
+          : h('p', { style: { color: 'var(--dsw-alias-label-tertiary)', fontSize: 13 } }, '输入一个 PDF 路径（默认工作区目录），点「加载」开始双语阅读。'),
       );
     }
 
