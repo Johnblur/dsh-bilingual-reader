@@ -14,9 +14,10 @@ interface ReactPieces {
   useState: (...args: any[]) => any;
   useEffect: (fn: () => void | (() => void), deps?: any[]) => void;
   useCallback: <T>(fn: T, deps: any[]) => T;
+  useRef: <T>(init: T) => { current: T };
 }
 
-export function makeReader({ h, useState, useEffect, useCallback }: ReactPieces) {
+export function makeReader({ h, useState, useEffect, useCallback, useRef }: ReactPieces) {
   const PdfView = makePdfView({ h, useState, useEffect });
   return function BilingualReader(props: { file?: string; controller?: ReaderController }): any {
     const { file = '', controller } = props as { file?: string; controller?: ReaderController };
@@ -28,6 +29,7 @@ export function makeReader({ h, useState, useEffect, useCallback }: ReactPieces)
     const [contextLen, setContextLen] = useState(250);
     const [clipAvailable, setClipAvailable] = useState(false);
     const [selError, setSelError] = useState(false);
+    const reqSeq = useRef(0);
 
     const load = useCallback(async () => {
       if (!controller || !file) return;
@@ -40,8 +42,9 @@ export function makeReader({ h, useState, useEffect, useCallback }: ReactPieces)
     const normalize = (s: string) => s.replace(/\s+/g, ' ').trim();
 
     async function doTranslate(copied: string): Promise<void> {
-      if (!copied) { setSel({ selection: '', context: '' }); setSelResult('（剪贴板为空：请先在 PDF 里选中并复制）'); setSelError(true); return; }
-      if (!doc) { setSelResult('（文档未加载）'); setSelError(true); return; }
+      const seq = ++reqSeq.current;
+      if (!copied) { setSel({ selection: '', context: '' }); setSelError(true); setSelResult('（剪贴板为空：请先在 PDF 里选中并复制）'); return; }
+      if (!doc) { setSelError(true); setSelResult('（文档未加载）'); return; }
       const selText = normalize(copied).slice(0, 1500);
       const normDoc = normalize(doc.fullText);
       let context = '';
@@ -60,9 +63,10 @@ export function makeReader({ h, useState, useEffect, useCallback }: ReactPieces)
           { kind: 'selection', selection: selText, context, glossary, target: '中文' },
           new AbortController().signal, () => {},
         );
-        setSelResult(res); setSelError(false);
+        // Only apply the result if this is still the latest request (avoid stale overwrites).
+        if (seq === reqSeq.current) { setSelResult(res); setSelError(false); }
       } catch (err) {
-        setSelResult('翻译失败：' + (err instanceof Error ? err.message : String(err))); setSelError(true);
+        if (seq === reqSeq.current) { setSelResult('翻译失败：' + (err instanceof Error ? err.message : String(err))); setSelError(true); }
       }
     }
 
@@ -117,7 +121,7 @@ export function makeReader({ h, useState, useEffect, useCallback }: ReactPieces)
       div.addEventListener('pointerup', done);
     }
 
-    const btn = { border: '1px solid #d9d9d9', background: '#fafafa', color: '#1f2329', borderRadius: 6, padding: '4px 10px', fontSize: 13, cursor: 'pointer' };
+    const btn = { border: '1px solid #d0d0d0', background: '#f5f5f5', color: '#1f2329', borderRadius: 6, padding: '4px 10px', fontSize: 13, cursor: 'pointer' };
 
     const top = h('div', { style: { height: `${topPct}%`, overflow: 'hidden', display: 'flex', flexDirection: 'column' } },
       h(PdfView, { file }),
@@ -131,7 +135,7 @@ export function makeReader({ h, useState, useEffect, useCallback }: ReactPieces)
           ? h('span', { style: { fontSize: 13 } }, '✓ 已启用自动翻译')
           : h('button', { onClick: () => void onClipboardTranslate(), style: btn }, '翻译选中'),
         h('label', { style: { fontSize: 13, color: '#555' } }, '上下文'),
-        h('input', { type: 'range', min: 0, max: 800, step: 50, value: contextLen, onChange: (e: any) => setContextLen(Number(e.target.value)), style: { width: 160 } }),
+        h('input', { type: 'range', min: 0, max: 800, step: 50, value: contextLen, onChange: (e: any) => setContextLen(Number(e.target.value)), style: { width: 160, accentColor: '#555' } }),
         h('span', { style: { fontSize: 13, color: '#555' } }, contextLen + ' 字'),
       ),
       h('div', { style: { marginTop: 10 } },

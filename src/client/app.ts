@@ -19,7 +19,7 @@ export function makeClientFactory(): (require: (m: string) => unknown) => { inje
     const react = require('react') as typeof ReactNS;
     const { useState } = react;
     const h = react.createElement as any;
-    const BilingualReader = makeReader({ h, useState, useEffect: react.useEffect as any, useCallback: react.useCallback as any });
+    const BilingualReader = makeReader({ h, useState, useEffect: react.useEffect as any, useCallback: react.useCallback as any, useRef: react.useRef as any });
 
     const controller = {
       loadDocument: (file: string) => post('/bilingual-reader/extract', { path: file }),

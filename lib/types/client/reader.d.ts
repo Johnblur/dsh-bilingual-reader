@@ -12,8 +12,11 @@ interface ReactPieces {
     useState: (...args: any[]) => any;
     useEffect: (fn: () => void | (() => void), deps?: any[]) => void;
     useCallback: <T>(fn: T, deps: any[]) => T;
+    useRef: <T>(init: T) => {
+        current: T;
+    };
 }
-export declare function makeReader({ h, useState, useEffect, useCallback }: ReactPieces): (props: {
+export declare function makeReader({ h, useState, useEffect, useCallback, useRef }: ReactPieces): (props: {
     file?: string;
     controller?: ReaderController;
 }) => any;
