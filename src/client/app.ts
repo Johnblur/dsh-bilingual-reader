@@ -15,6 +15,24 @@ async function post(path: string, body: unknown): Promise<any> {
   return res.json();
 }
 
+// A "translate / languages" glyph matching better-sidebar's 16px outline icon
+// style: stroke uses currentColor, no fill, so it inherits the tab's ink and
+// adapts to light/dark automatically. Hand-built SVG (no icon dep).
+function languageIcon(h: (...args: any[]) => any, size: number): any {
+  return h('svg', {
+    width: size, height: size, viewBox: '0 0 24 24',
+    fill: 'none', stroke: 'currentColor', strokeWidth: 2,
+    strokeLinecap: 'round', strokeLinejoin: 'round',
+  },
+    h('path', { d: 'M5 8l6 6' }),
+    h('path', { d: 'M4 14l6-6 2-3' }),
+    h('path', { d: 'M2 5h12' }),
+    h('path', { d: 'M7 2h1' }),
+    h('path', { d: 'm22 22-5-10-5 10' }),
+    h('path', { d: 'M14 18h6' }),
+  );
+}
+
 export function makeClientFactory(): (require: (m: string) => unknown) => { inject: string[]; apply: (ctx: unknown) => void } {
   return (require) => {
     const react = require('react') as typeof ReactNS;
@@ -51,15 +69,28 @@ export function makeClientFactory(): (require: (m: string) => unknown) => { inje
       );
     }
 
-    const inject = ['betterSidebar', 'slots'];
+    const inject = ['betterSidebar', 'slots', 'locale'];
     const apply = (ctx: unknown) => {
-      const c = ctx as { betterSidebar?: unknown; effect: (fn: unknown) => unknown };
+      const c = ctx as {
+        betterSidebar?: unknown;
+        locale?: { getSnapshot: () => { active: string } };
+        effect: (fn: unknown) => unknown;
+      };
       const bs = c.betterSidebar as { registerTab: (d: unknown) => () => void } | undefined;
       if (!bs) return;
+      // DSH i18n: the active locale comes from ctx.locale (same source better-sidebar's
+      // own tabs use). English UI → "translator", Chinese UI → "翻译". This is the single
+      // title field the tab bar, + menu, and settings card all render, so language-aware
+      // is the standard (规范) way and matches better-sidebar's native tabs.
+      const isZh = () =>
+        (c.locale?.getSnapshot?.().active ?? (typeof navigator !== 'undefined' ? navigator.language : ''))
+          .toLowerCase()
+          .startsWith('zh');
       c.effect(() =>
         bs.registerTab({
           id: 'bilingual-reader',
-          title: '双语阅读',
+          title: () => (isZh() ? '翻译' : 'translator'),
+          icon: (size: number) => languageIcon(h, size),
           component: ReaderTab,
         }),
       );
