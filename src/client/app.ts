@@ -36,12 +36,13 @@ function languageIcon(h: (...args: any[]) => any, size: number): any {
 export function makeClientFactory(): (require: (m: string) => unknown) => { inject: string[]; apply: (ctx: unknown) => void } {
   return (require) => {
     const react = require('react') as typeof ReactNS;
-    const { useState } = react;
+    const { useState, useEffect } = react;
     const h = react.createElement as any;
     const BilingualReader = makeReader({ h, useState, useEffect: react.useEffect as any, useCallback: react.useCallback as any, useRef: react.useRef as any });
 
     const controller = {
       loadDocument: (file: string) => post('/bilingual-reader/extract', { path: file }),
+      listPdfs: (dir: string, limit = 200) => post('/bilingual-reader/list-pdfs', { dir, limit }),
       translateChunk: async (chunkId: string, _glossary: Record<string, string>, _signal: AbortSignal, emit: (e: any) => void) => {
         emit({ type: 'start', requestId: chunkId });
         const r = await post('/bilingual-reader/translate-chunk', { chunkId });
@@ -56,16 +57,54 @@ export function makeClientFactory(): (require: (m: string) => unknown) => { inje
     };
 
     function ReaderTab(props: any): any {
+      const scope = props?.scope;
+      const cwd: string = scope?.cwd ?? '';
       const [path, setPath] = useState('');
       const [chosen, setChosen] = useState('');
+      const [browsing, setBrowsing] = useState(false);
+      const [pdfs, setPdfs] = useState<{ path: string; name: string }[]>([]);
+      const [browseErr, setBrowseErr] = useState('');
+      const [loading, setLoading] = useState(false);
+
+      // Lazy-load the PDF list when the picker is opened.
+      useEffect(() => {
+        if (!browsing || !cwd) return;
+        let cancelled = false;
+        setLoading(true);
+        setBrowseErr('');
+        controller.listPdfs(cwd, 200)
+          .then((r: any) => { if (!cancelled) setPdfs(Array.isArray(r?.files) ? r.files : []); })
+          .catch((e: any) => { if (!cancelled) { setPdfs([]); setBrowseErr('列出 PDF 失败：' + (e instanceof Error ? e.message : String(e))); } })
+          .finally(() => { if (!cancelled) setLoading(false); });
+        return () => { cancelled = true; };
+      }, [browsing, cwd]);
+
+      const pick = (p: string) => { setPath(p); setChosen(p); setBrowsing(false); };
+
       return h('div', { style: { padding: 12, display: 'flex', flexDirection: 'column', gap: 8, height: '100%' } },
         h('div', { style: { display: 'flex', gap: 8 } },
           h('input', { value: path, placeholder: '粘贴或输入 PDF 路径…', onChange: (e: any) => setPath(e.target.value), style: { ...inputBase, flex: 1 } }),
           h('button', { onClick: () => setChosen(path), className: BTN_CLS }, '加载'),
+          h('button', { onClick: () => setBrowsing(v => !v), className: BTN_CLS }, '浏览…'),
         ),
+        browsing
+          ? h('div', { style: { border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 6, maxHeight: 260, overflow: 'auto', padding: 6, display: 'flex', flexDirection: 'column', gap: 2 } },
+              loading
+                ? h('p', { style: { color: 'var(--dsw-alias-label-tertiary)', fontSize: 13, padding: '4px 6px' } }, '正在扫描 PDF…')
+                : browseErr
+                  ? h('p', { style: { color: 'var(--dsw-alias-state-error-primary)', fontSize: 13, padding: '4px 6px' } }, browseErr)
+                  : pdfs.length === 0
+                    ? h('p', { style: { color: 'var(--dsw-alias-label-tertiary)', fontSize: 13, padding: '4px 6px' } }, cwd ? ('未找到 PDF：' + cwd) : '未提供工作区目录。')
+                    : pdfs.map((p) => h('button', {
+                        key: p.path,
+                        onClick: () => pick(p.path),
+                        style: { textAlign: 'left', border: 'none', background: 'transparent', color: 'var(--dsw-alias-label-primary)', fontSize: 13, borderRadius: 4, padding: '4px 6px', cursor: 'pointer', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+                      }, p.name)),
+            )
+          : undefined,
         chosen
           ? h(BilingualReader, { file: chosen, controller })
-          : h('p', { style: { color: 'var(--dsw-alias-label-tertiary)', fontSize: 13 } }, '输入一个 PDF 路径，点「加载」开始双语阅读。'),
+          : h('p', { style: { color: 'var(--dsw-alias-label-tertiary)', fontSize: 13 } }, '输入一个 PDF 路径，点「加载」开始双语阅读；或点「浏览…」从工作区选择。'),
       );
     }
 

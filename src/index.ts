@@ -79,6 +79,16 @@ export function apply(ctx: { llm: unknown; webServer: unknown }): void {
         return;
       }
       const body = await readJson(req);
+      // List .pdf files under a workdir (recursively, bounded) so the loader tab can
+      // offer a "browse" picker — no manual copy/paste of a full path. Self-contained
+      // (Node fs), so the plugin stays independent of better-sidebar's internal API.
+      if (pathname === '/bilingual-reader/list-pdfs' && req.method === 'POST') {
+        const root = String(body?.dir ?? '');
+        const limit = Math.max(1, Math.min(500, Number(body?.limit ?? 200) || 200));
+        const depth = Math.max(0, Math.min(10, Number(body?.depth ?? 3) || 3));
+        const files = await listPdfs(root, limit, depth);
+        return json(res, 200, { dir: root, files });
+      }
       if (pathname === '/bilingual-reader/extract' && req.method === 'POST') {
         const file = String(body?.path ?? '');
         const text = await extractPdf(file);
@@ -121,4 +131,36 @@ function readJson(req: HttpReq): Promise<Record<string, unknown> | undefined> {
 function json(res: HttpRes, code: number, payload: unknown): void {
   res.writeHead(code, { 'content-type': 'application/json; charset=utf-8' });
   res.end(JSON.stringify(payload));
+}
+
+// Recursively collect .pdf files under `dir` (bounded by count + depth so a huge
+// or deeply nested workspace never hangs the request). Skips hidden dirs and
+// node_modules. Returns paths sorted with newest first (most recent PDF on top).
+async function listPdfs(dir: string, limit: number, depth: number): Promise<{ path: string; name: string }[]> {
+  const out: { path: string; name: string; mtime: number }[] = [];
+  const seen = new Set<string>();
+  const skip = new Set(['node_modules', '.git', '.dsh', 'dist', 'build', '.pnpm-store', '.npm-cache']);
+  const walk = async (d: string, level: number): Promise<void> => {
+    if (out.length >= limit || level > depth) return;
+    let entries;
+    try { entries = await fs.readdir(d, { withFileTypes: true }); }
+    catch { return; }
+    for (const e of entries) {
+      if (out.length >= limit) return;
+      const full = path.join(d, e.name);
+      if (!seen.has(full)) seen.add(full);
+      if (e.isDirectory()) {
+        if (e.name.startsWith('.') || skip.has(e.name)) continue;
+        await walk(full, level + 1);
+      } else if (e.isFile() && e.name.toLowerCase().endsWith('.pdf')) {
+        try {
+          const st = await fs.stat(full);
+          out.push({ path: full, name: e.name, mtime: st.mtimeMs });
+        } catch { /* ignore unreadable */ }
+      }
+    }
+  };
+  await walk(dir, 0);
+  out.sort((a, b) => b.mtime - a.mtime);
+  return out.slice(0, limit).map(({ path, name }) => ({ path, name }));
 }
