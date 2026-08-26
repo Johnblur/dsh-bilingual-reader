@@ -88,18 +88,26 @@ export function makeClientFactory(): (require: (m: string) => unknown) => { inje
           h('button', { onClick: () => setBrowsing(v => !v), className: BTN_CLS }, '浏览…'),
         ),
         browsing
-          ? h('div', { style: { border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 6, maxHeight: 260, overflow: 'auto', padding: 6, display: 'flex', flexDirection: 'column', gap: 2 } },
+          ? h('div', { style: { border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 6, maxHeight: 300, overflow: 'auto', padding: 8, display: 'flex', flexDirection: 'column', gap: 4 } },
               loading
-                ? h('p', { style: { color: 'var(--dsw-alias-label-tertiary)', fontSize: 13, padding: '4px 6px' } }, '正在扫描 PDF…')
+                ? h('p', { style: { color: 'var(--dsw-alias-label-tertiary)', fontSize: 13, padding: '6px 8px' } }, '正在扫描 PDF…')
                 : browseErr
-                  ? h('p', { style: { color: 'var(--dsw-alias-state-error-primary)', fontSize: 13, padding: '4px 6px' } }, browseErr)
+                  ? h('p', { style: { color: 'var(--dsw-alias-state-error-primary)', fontSize: 13, padding: '6px 8px' } }, browseErr)
                   : pdfs.length === 0
-                    ? h('p', { style: { color: 'var(--dsw-alias-label-tertiary)', fontSize: 13, padding: '4px 6px' } }, cwd ? ('未找到 PDF：' + cwd) : '未提供工作区目录。')
-                    : pdfs.map((p) => h('button', {
-                        key: p.path,
-                        onClick: () => pick(p.path),
-                        style: { textAlign: 'left', border: 'none', background: 'transparent', color: 'var(--dsw-alias-label-primary)', fontSize: 13, borderRadius: 4, padding: '4px 6px', cursor: 'pointer', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-                      }, p.name)),
+                    ? h('p', { style: { color: 'var(--dsw-alias-label-tertiary)', fontSize: 13, padding: '6px 8px' } }, cwd ? ('未找到 PDF：' + cwd) : '未提供工作区目录。')
+                    : pdfs.map((p) => {
+                        const idx = p.path.lastIndexOf('\\');
+                        const dir = idx >= 0 ? p.path.slice(0, idx) : '';
+                        const file = idx >= 0 ? p.path.slice(idx + 1) : p.path;
+                        return h('button', {
+                          key: p.path,
+                          onClick: () => pick(p.path),
+                          style: { textAlign: 'left', border: 'none', background: 'transparent', color: 'var(--dsw-alias-label-primary)', borderRadius: 4, padding: '6px 8px', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 2, width: '100%' },
+                        },
+                          h('span', { style: { fontSize: 13, fontWeight: 500, wordBreak: 'break-all' } }, file),
+                          dir ? h('span', { style: { fontSize: 11, color: 'var(--dsw-alias-label-tertiary)', wordBreak: 'break-all', lineHeight: 1.4 } }, dir) : undefined,
+                        );
+                      }),
             )
           : undefined,
         chosen
