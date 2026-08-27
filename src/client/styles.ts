@@ -7,11 +7,13 @@
 export const BTN_CLS = 'dsh-bl-btn';
 
 // Hover needs a real rule (an inline style can't express :hover), so we inject
-// one CSS block once. The side effect runs at module import (guarded), so it
-// works whether imported from the reader or the loader component.
-export function ensurePluginStyles(): void {
-  if (typeof document === 'undefined') return;
-  if (document.getElementById('dsh-bl-plugin-styles')) return;
+// one CSS block. Returns a disposer that removes the element, so the caller can
+// wire it through ctx.effect (cordis unload → the style is cleaned up, keeping
+// hot reload from leaking stale <style> tags). The element is id-deduped so
+// multiple views share one injected block while a fiber is live.
+export function injectPluginStyles(): () => void {
+  if (typeof document === 'undefined') return () => {};
+  if (document.getElementById('dsh-bl-plugin-styles')) return () => {};
   const s = document.createElement('style');
   s.id = 'dsh-bl-plugin-styles';
   s.textContent =
@@ -20,8 +22,10 @@ export function ensurePluginStyles(): void {
     'color:var(--dsw-alias-label-primary);border-radius:6px;padding:4px 10px;font-size:13px;' +
     'cursor:pointer}.dsh-bl-btn:hover{background:var(--dsw-alias-interactive-bg-hover)}';
   document.head.appendChild(s);
+  return () => {
+    if (s.parentNode) s.parentNode.removeChild(s);
+  };
 }
-ensurePluginStyles();
 
 // Base text-input skin. Border uses the same `--dsw-alias-border-l2` as the
 // button so the input reads at the same visual weight and stays easy to see.

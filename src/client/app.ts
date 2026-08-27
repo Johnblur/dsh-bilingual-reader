@@ -3,7 +3,7 @@
 // calls the host /bilingual-reader/* routes (extract + isolated translate).
 // React is sourced from the factory's `require` (single DSH React instance).
 import { makeReader } from './reader.js';
-import { BTN_CLS, inputBase } from './styles.js';
+import { BTN_CLS, inputBase, injectPluginStyles } from './styles.js';
 import type * as ReactNS from 'react';
 
 async function post(path: string, body: unknown): Promise<any> {
@@ -125,10 +125,13 @@ export function makeClientFactory(): (require: (m: string) => unknown) => { inje
       const c = ctx as {
         betterSidebar?: unknown;
         locale?: { getSnapshot: () => { active: string } };
-        effect: (fn: unknown) => unknown;
+        effect: (fn: () => unknown, label?: string) => unknown;
       };
       const bs = c.betterSidebar as { registerTab: (d: unknown) => () => void } | undefined;
       if (!bs) return;
+      // Inject the plugin's shared CSS via ctx.effect so a hot reload (fiber
+      // unload) removes the old <style> tag instead of leaking it.
+      c.effect(() => injectPluginStyles(), 'dsh-bilingual-reader: plugin styles');
       // DSH i18n: the active locale comes from ctx.locale (same source better-sidebar's
       // own tabs use). This `title` feeds the + menu and the settings card, so there we
       // show the localized name: Chinese UI → "翻译", English UI → "translator".

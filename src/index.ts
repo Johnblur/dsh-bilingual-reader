@@ -18,17 +18,23 @@ export const inject = ['llm', 'webServer'];
 interface HttpReq { method?: string; url?: string; on: (e: 'data' | 'end' | 'error', cb: (...a: any[]) => void) => void }
 interface HttpRes { writeHead: (code: number, headers?: Record<string, string>) => void; end: (body?: string | Buffer | Uint8Array) => void }
 
-export function apply(ctx: { llm: unknown; webServer: unknown }): void {
+export function apply(ctx: { llm: unknown; webServer: unknown; effect: (fn: () => unknown, label?: string) => unknown }): void {
   const gateway: LlmGateway = createLlmGateway(ctx.llm);
   const nodeRequire = createRequire(import.meta.url);
   const pdfjsDir = path.dirname(nodeRequire.resolve('pdfjs-dist/package.json'));
-  const ws = ctx.webServer as { register: (r: { kind: string; path: string; handler: (req: HttpReq, res: HttpRes) => void }) => void };
+  const ws = ctx.webServer as { register: (r: { kind: string; path: string; handler: (req: HttpReq, res: HttpRes) => void }) => () => void };
 
-  // single-document state (extract populates chunks; translate-chunk looks them up)
+  // single-document state (extract populates chunks; translate-chunk looks them up).
+  // Scoped inside `apply` so a hot reload creates a fresh set and the old fiber's
+  // route disposer (see below) stops the stale one from being reachable.
   let chunks: DocChunk[] = [];
   let glossary: Record<string, string> = {};
 
-  ws.register({ kind: 'prefix', path: '/bilingual-reader', handler: async (req, res) => {
+  // Route registration goes through ctx.effect: the disposer returned by
+  // webServer.register is collected and auto-invoked when the fiber unloads,
+  // so HMR removes the old /bilingual-reader route (and its stale state)
+  // before the reloaded plugin re-registers it.
+  ctx.effect(() => ws.register({ kind: 'prefix', path: '/bilingual-reader', handler: async (req, res) => {
     const u = new URL(req.url ?? '/', 'http://x');
     const pathname = u.pathname;
     try {
@@ -122,7 +128,7 @@ export function apply(ctx: { llm: unknown; webServer: unknown }): void {
     } catch (e) {
       return json(res, 500, { error: e instanceof Error ? e.message : String(e) });
     }
-  } });
+  } }), 'dsh-bilingual-reader: /bilingual-reader routes');
 }
 
 function readJson(req: HttpReq): Promise<Record<string, unknown> | undefined> {
