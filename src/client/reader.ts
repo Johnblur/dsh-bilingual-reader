@@ -84,6 +84,21 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
     useEffect(() => { saveLangBlob(LS_CONTEXT_LEN, contextLen); }, [contextLen]);
     useEffect(() => { saveLangBlob(LS_CUSTOM, customLangs); }, [customLangs]);
 
+    // Re-translate the current selection when the source/target language changes.
+    // Skip the initial mount (so we don't duplicate the clipboard-triggered
+    // translate); only act when a selection is already on screen.
+    const mountedRef = useRef(false);
+    const lastLangKeyRef = useRef('');
+    useEffect(() => {
+      const key = `${source}\u0000${target}`;
+      if (!mountedRef.current) { mountedRef.current = true; lastLangKeyRef.current = key; return; }
+      const selNow = sel as { selection?: string } | null;
+      if (selNow?.selection && key !== lastLangKeyRef.current) {
+        lastLangKeyRef.current = key;
+        void doTranslate(selNow.selection);
+      }
+    }, [source, target]);
+
     const normalize = (s: string) => s.replace(/\s+/g, ' ').trim();
 
     async function doTranslate(copied: string): Promise<void> {
