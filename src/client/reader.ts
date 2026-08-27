@@ -58,6 +58,17 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
     const [target, setTarget] = useState(initialTarget(isZhUI()));
     const [detected, setDetected] = useState('');
     const reqSeq = useRef(0);
+    // The auto-translate poll effect captures `doTranslate` from its own render
+    // (old closure). Instead of adding source/target to that effect's deps (which
+    // would reset the interval on every change), keep the CURRENT values in refs
+    // and have doTranslate read them — so both the poll and the manual button
+    // always use the latest language selection.
+    const sourceRef = useRef(source);
+    const targetRef = useRef(target);
+    const customLangsRef = useRef(customLangs);
+    sourceRef.current = source;
+    targetRef.current = target;
+    customLangsRef.current = customLangs;
 
     const load = useCallback(async () => {
       if (!controller || !file) return;
@@ -92,26 +103,31 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
       setSel({ selection: selText, context });
       setSelResult('');
       if (!controller) { setSelError(true); return; }
+      // Read the LIVE selection (poll may run in an old closure) from refs, so a
+      // mid-session language change always takes effect.
+      const src = sourceRef.current;
+      const tgt = targetRef.current;
+      const customs = customLangsRef.current;
       // Resolve the effective source language: if the user picked "auto", run the
       // heuristic detector; only if that is ambiguous (multiple same-script langs
       // or a low-confidence Latin read) do we call the LLM classifier.
-      let effSource = source;
+      let effSource = src;
       try {
-        if (source === AUTO_DETECT.code) {
-          const all = allLangs(customLangs);
+        if (src === AUTO_DETECT.code) {
+          const all = allLangs(customs);
           const d = detectByScript(selText, all);
           if (needsLlmDetect(d, all) && controller.detectLanguage) {
             try {
               const code = await controller.detectLanguage(selText);
-              effSource = resolveLangCode(code, customLangs);
-              setDetected(langName(effSource, customLangs));
+              effSource = resolveLangCode(code, customs);
+              setDetected(langName(effSource, customs));
             } catch {
               effSource = d.script === 'latin' ? 'en' : d.lang;
-              setDetected(langName(effSource, customLangs));
+              setDetected(langName(effSource, customs));
             }
           } else {
             effSource = d.lang;
-            setDetected(langName(effSource, customLangs));
+            setDetected(langName(effSource, customs));
           }
           if (seq !== reqSeq.current) return;
         } else {
@@ -120,7 +136,7 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
       } catch { setDetected(''); }
       try {
         const res = await controller.translateSelection(
-          { kind: 'selection', selection: selText, context, glossary, source: effSource, target },
+          { kind: 'selection', selection: selText, context, glossary, source: effSource, target: tgt },
           new AbortController().signal, () => {},
         );
         // Only apply the result if this is still the latest request (avoid stale overwrites).
