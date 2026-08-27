@@ -9,7 +9,7 @@ import { extractPdf } from './host/pdf.js';
 import { chunkDocument } from './host/chunk.js';
 import { extractGlossary } from './host/glossary.js';
 import { createLlmGateway, type LlmGateway } from './host/llmClient.js';
-import { translateChunk, translateSelection } from './host/translate.js';
+import { translateChunk, translateSelection, detectTextLanguage } from './host/translate.js';
 import { resolveModel } from './host/model.js';
 import type { DocChunk, TranslateRequest } from './types.js';
 
@@ -108,6 +108,15 @@ export function apply(ctx: { llm: unknown; webServer: unknown }): void {
         const requestId = `sel-${Date.now()}`;
         const out = await translateSelection(gateway, reqBody.selection ?? '', reqBody.context ?? '', { ...reqBody, kind: 'selection', glossary }, new AbortController().signal, () => {}, requestId);
         return json(res, 200, { requestId, text: out });
+      }
+      // Classify a snippet's language (no translation). Used when the source is
+      // "auto" and the heuristic detector is ambiguous.
+      if (pathname === '/bilingual-reader/detect-language' && req.method === 'POST') {
+        const text = String(body?.text ?? '');
+        const p = typeof body?.provider === 'string' ? body.provider : undefined;
+        const m = typeof body?.model === 'string' ? body.model : undefined;
+        const lang = await detectTextLanguage(gateway, text, { provider: p, model: m });
+        return json(res, 200, { lang });
       }
       return json(res, 404, { error: 'unknown route ' + pathname });
     } catch (e) {

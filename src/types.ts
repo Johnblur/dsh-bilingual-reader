@@ -37,6 +37,9 @@ export interface TranslateRequest {
   chunkIds?: string[];
   /** Term/glossary map to keep terminology consistent. */
   glossary?: Record<string, string>;
+  /** Source language (ISO/prompt name); empty/undefined = model auto-judges. */
+  source?: string;
+  /** Target language (updates the previous hardcoded '中文'). */
   target?: string;
   /** Optional override; falls back to the per-mode default (see model.ts). */
   provider?: string;

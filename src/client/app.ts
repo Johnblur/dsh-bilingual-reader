@@ -43,6 +43,10 @@ export function makeClientFactory(): (require: (m: string) => unknown) => { inje
     const controller = {
       loadDocument: (file: string) => post('/bilingual-reader/extract', { path: file }),
       listPdfs: (dir: string, limit = 200) => post('/bilingual-reader/list-pdfs', { dir, limit }),
+      detectLanguage: async (text: string) => {
+        const r = await post('/bilingual-reader/detect-language', { text });
+        return (r && typeof r.lang === 'string') ? r.lang : '';
+      },
       translateChunk: async (chunkId: string, _glossary: Record<string, string>, _signal: AbortSignal, emit: (e: any) => void) => {
         emit({ type: 'start', requestId: chunkId });
         const r = await post('/bilingual-reader/translate-chunk', { chunkId });

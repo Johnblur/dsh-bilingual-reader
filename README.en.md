@@ -16,10 +16,15 @@ A **DeepSeek Harness (DSH)** plugin that lets you read academic PDFs in the `dsh
 
 - **Native PDF rendering**: shown with the browser / Electron PDF engine — **pixel-perfect layout**, pageable, copyable, identical to the built-in viewer.
 - **Selection translation**: copy the selected text → on Desktop (Electron) it **auto-translates**; when auto is unavailable, click the "Translate selection" button.
+- **Multi-language mutual translation**: separate Source / Target dropdowns. Ships with **Chinese / English / Japanese / Korean**, and you can **add any language** via "＋语言…". The default target follows the UI language.
+- **Language auto-detect**: with Source set to "**Auto-detect**", a zero-cost character-class heuristic classifies the text (Chinese / Japanese / Korean are unambiguous). Only when the active set has **multiple same-script languages** (e.g. English + French + German) or the heuristic read is unclear does it run one LLM classify; the result **pre-fills** the Source dropdown and is always editable.
 - **Context-aware**: finds the **unique position** of the copied text in the full document and uses the surrounding text as context. A unique match gives the best result; multiple/no match falls back to **context-free translation** (to avoid feeding a possibly-wrong context).
 - **Adjustable context length**: a slider controls how much surrounding text is used as context.
+- **Persistent settings**: source, target, context length, and custom languages are remembered across reopens.
 - **Original + translation side by side**: shows the copied original and the translation below, plus a one-click **copy translation**.
 - **Isolated from the main conversation**: translation runs as a one-off `ctx.llm` call and is **never written back** to the main session.
+
+> **Small languages**: translation quality is bounded by the underlying LLM. The plugin pins the source/target language names (and lets you add a custom name) to steer the model, but the ceiling for low-resource languages is the model's own capability.
 
 ## Install
 
@@ -32,11 +37,11 @@ Then **fully quit the DSH Desktop** from the tray and relaunch.
 ## Usage
 
 1. In the better-sidebar, open `+` → the "**Bilingual Reader**" tab (the tab strip shows `translator`; the + menu shows `翻译` / `translator` per UI language).
-2. Enter or paste a PDF path → click "**Load**".
+2. Click "**Browse…**" to pick a PDF from the workspace, or enter/paste a path and click "**Load**".
 3. In the PDF above, **select some text and copy it**:
    - Desktop (Electron): detected via clipboard change → **auto-translates**.
    - Web / when auto is unavailable: click the "**Translate selection**" button.
-4. The **original + translation** appear below; use the context slider to tune the context length.
+4. The **original + translation** appear below; use the **Source / Target** dropdowns to pick the mutual-translation languages (Source set to "Auto-detect" lets the plugin judge it), and the **context** slider to tune the context length.
 
 ## Dependencies & notes
 
