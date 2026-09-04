@@ -48,6 +48,10 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
     const [glossary, setGloss] = useState({});
     const [sel, setSel] = useState(null);
     const [selResult, setSelResult] = useState('');
+    // How well the copied text matched the document for context recovery.
+    // `matched` = unique hit, context used; `multiple` = several hits, no context;
+    // `not-found` = no hit; `empty` = blank/too short (no status shown).
+    const [matchSel, setMatchSel] = useState({ kind: 'empty' } as { kind: 'matched' | 'multiple' | 'not-found' | 'empty'; count?: number });
     const [topPct, setTopPct] = useState(75);
     const [contextLen, setContextLen] = useState(initialContextLen());
     const [clipAvailable, setClipAvailable] = useState(false);
@@ -109,11 +113,22 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
       const normDoc = normalize(doc.fullText);
       let context = '';
       const hits: number[] = [];
-      let i = normDoc.indexOf(selText);
-      while (i >= 0) { hits.push(i); i = normDoc.indexOf(selText, i + 1); }
-      if (hits.length === 1) {
+      if (selText) {
+        let i = normDoc.indexOf(selText);
+        while (i >= 0) { hits.push(i); i = normDoc.indexOf(selText, i + 1); }
+      }
+      // Record how the context lookup went, so the UI can tell the user whether
+      // the translation used surrounding context rather than dumping it all.
+      if (!selText) {
+        setMatchSel({ kind: 'empty' });
+      } else if (hits.length === 1) {
         const idx = hits[0];
         context = normDoc.slice(Math.max(0, idx - contextLen), idx + selText.length + contextLen);
+        setMatchSel({ kind: 'matched', count: 1 });
+      } else if (hits.length > 1) {
+        setMatchSel({ kind: 'multiple', count: hits.length });
+      } else {
+        setMatchSel({ kind: 'not-found' });
       }
       setSel({ selection: selText, context });
       setSelResult('');
@@ -272,6 +287,18 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
       h('div', { style: { marginTop: 10 } },
         sel
           ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 6 } },
+              matchSel.kind !== 'empty'
+                ? h('div', { style: { display: 'flex', gap: 6, alignItems: 'center', fontSize: 12 } },
+                    h('span', { style: { color: matchSel.kind === 'matched' ? 'var(--dsw-alias-state-success-primary)' : 'var(--dsw-alias-state-warn-primary)' } },
+                      matchSel.kind === 'matched' ? '✓' : '⚠'),
+                    h('span', { style: { color: 'var(--dsw-alias-label-secondary)' } },
+                      matchSel.kind === 'matched'
+                        ? '已匹配到原文，使用上下文翻译'
+                        : matchSel.kind === 'multiple'
+                          ? ('该片段在原文出现 ' + (matchSel.count ?? 0) + ' 处，未使用上下文（直接翻译）')
+                          : '未在原文中定位到该片段，直接翻译'),
+                  )
+                : undefined,
               h('div', { style: { color: '#666', fontSize: 13, maxHeight: 130, overflow: 'auto' } }, '原文：' + sel.selection),
               h('div', { style: { display: 'flex', gap: 8, alignItems: 'flex-start' } },
                 h('div', { style: { flex: 1, lineHeight: 1.7, color: selError ? '#e53e3e' : '#1f2329' } }, selResult || '翻译中…'),
