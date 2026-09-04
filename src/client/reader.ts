@@ -4,6 +4,7 @@
 import type { DocumentText, TranslateRequest } from '../types.js';
 import { makePdfView } from './PdfView.js';
 import { BTN_CLS, inputBase } from './styles.js';
+import { fuzzyMatch, normalizeForMatch, contextRange } from './match.js';
 import {
   AUTO_DETECT, allLangs, detectByScript, needsLlmDetect,
   defaultSource, defaultTarget,
@@ -49,9 +50,9 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
     const [sel, setSel] = useState(null);
     const [selResult, setSelResult] = useState('');
     // How well the copied text matched the document for context recovery.
-    // `matched` = unique hit, context used; `multiple` = several hits, no context;
-    // `not-found` = no hit; `empty` = blank/too short (no status shown).
-    const [matchSel, setMatchSel] = useState({ kind: 'empty' } as { kind: 'matched' | 'multiple' | 'not-found' | 'empty'; count?: number });
+    // `matched` = context used (unique or best-of-many); `multiple` = several
+    // plausible windows, best one used; `not-found` = no match; `empty` = blank.
+    const [matchSel, setMatchSel] = useState({ kind: 'empty' } as { kind: 'matched' | 'multiple' | 'not-found' | 'empty'; count?: number; score?: number });
     const [topPct, setTopPct] = useState(75);
     const [contextLen, setContextLen] = useState(initialContextLen());
     const [clipAvailable, setClipAvailable] = useState(false);
@@ -103,32 +104,26 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
       }
     }, [source, target]);
 
-    const normalize = (s: string) => s.replace(/\s+/g, ' ').trim();
-
     async function doTranslate(copied: string): Promise<void> {
       const seq = ++reqSeq.current;
       if (!copied) { setSel({ selection: '', context: '' }); setSelError(true); setSelResult('（剪贴板为空：请先在 PDF 里选中并复制）'); return; }
       if (!doc) { setSelError(true); setSelResult('（文档未加载）'); return; }
-      const selText = normalize(copied).slice(0, 1500);
-      const normDoc = normalize(doc.fullText);
+      const selText = normalizeForMatch(copied).slice(0, 1500);
+      const normDoc = normalizeForMatch(doc.fullText);
       let context = '';
-      const hits: number[] = [];
-      if (selText) {
-        let i = normDoc.indexOf(selText);
-        while (i >= 0) { hits.push(i); i = normDoc.indexOf(selText, i + 1); }
-      }
-      // Record how the context lookup went, so the UI can tell the user whether
-      // the translation used surrounding context rather than dumping it all.
       if (!selText) {
         setMatchSel({ kind: 'empty' });
-      } else if (hits.length === 1) {
-        const idx = hits[0];
-        context = normDoc.slice(Math.max(0, idx - contextLen), idx + selText.length + contextLen);
-        setMatchSel({ kind: 'matched', count: 1 });
-      } else if (hits.length > 1) {
-        setMatchSel({ kind: 'multiple', count: hits.length });
       } else {
-        setMatchSel({ kind: 'not-found' });
+        // Tolerant matching (hyphen/whitespace/case differences between the
+        // copied selection and the pdfjs-extracted fullText).
+        const m = fuzzyMatch(doc.fullText, copied, 0.6);
+        if (m) {
+          const { from, to } = contextRange(m.start, copied, contextLen);
+          context = normDoc.slice(from, to);
+          setMatchSel(m.count > 1 ? { kind: 'multiple', count: m.count, score: m.score } : { kind: 'matched', count: 1, score: m.score });
+        } else {
+          setMatchSel({ kind: 'not-found' });
+        }
       }
       setSel({ selection: selText, context });
       setSelResult('');
@@ -289,13 +284,13 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
           ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 6 } },
               matchSel.kind !== 'empty'
                 ? h('div', { style: { display: 'flex', gap: 6, alignItems: 'center', fontSize: 12 } },
-                    h('span', { style: { color: matchSel.kind === 'matched' ? 'var(--dsw-alias-state-success-primary)' : 'var(--dsw-alias-state-warn-primary)' } },
-                      matchSel.kind === 'matched' ? '✓' : '⚠'),
+                    h('span', { style: { color: matchSel.kind === 'not-found' ? 'var(--dsw-alias-state-error-primary)' : 'var(--dsw-alias-state-success-primary)' } },
+                      matchSel.kind === 'not-found' ? '⚠' : '✓'),
                     h('span', { style: { color: 'var(--dsw-alias-label-secondary)' } },
                       matchSel.kind === 'matched'
-                        ? '已匹配到原文，使用上下文翻译'
+                        ? ('已匹配到原文，使用上下文翻译' + (matchSel.score !== undefined ? '（重合 ' + Math.round(matchSel.score * 100) + '%）' : ''))
                         : matchSel.kind === 'multiple'
-                          ? ('该片段在原文出现 ' + (matchSel.count ?? 0) + ' 处，未使用上下文（直接翻译）')
+                          ? ('在原文找到 ' + (matchSel.count ?? 0) + ' 处相近内容，使用最匹配处上下文' + (matchSel.score !== undefined ? '（重合 ' + Math.round(matchSel.score * 100) + '%）' : ''))
                           : '未在原文中定位到该片段，直接翻译'),
                   )
                 : undefined,
