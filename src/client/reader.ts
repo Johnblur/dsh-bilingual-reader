@@ -4,7 +4,7 @@
 import type { DocumentText, TranslateRequest } from '../types.js';
 import { makePdfView } from './PdfView.js';
 import { BTN_CLS, inputBase } from './styles.js';
-import { fuzzyMatch, normalizeForMatch, contextRange } from './match.js';
+import { matchLetters, normalizeForMatch, contextRange } from './match.js';
 import {
   AUTO_DETECT, allLangs, detectByScript, needsLlmDetect,
   defaultSource, defaultTarget,
@@ -109,18 +109,17 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
       if (!copied) { setSel({ selection: '', context: '' }); setSelError(true); setSelResult('（剪贴板为空：请先在 PDF 里选中并复制）'); return; }
       if (!doc) { setSelError(true); setSelResult('（文档未加载）'); return; }
       const selText = normalizeForMatch(copied).slice(0, 1500);
-      const normDoc = normalizeForMatch(doc.fullText);
       let context = '';
       if (!selText) {
         setMatchSel({ kind: 'empty' });
       } else {
-        // Tolerant matching (hyphen/whitespace/case differences between the
-        // copied selection and the pdfjs-extracted fullText).
-        const m = fuzzyMatch(doc.fullText, copied, 0.6);
+        // Match by letter sequence only (punctuation/whitespace/case-insensitive),
+        // so a long sentence matches once, not at every sliding window.
+        const m = matchLetters(doc.fullText, copied);
         if (m) {
-          const { from, to } = contextRange(m.start, copied, contextLen);
-          context = normDoc.slice(from, to);
-          setMatchSel(m.count > 1 ? { kind: 'multiple', count: m.count, score: m.score } : { kind: 'matched', count: 1, score: m.score });
+          const { from, to } = contextRange(m.start, m.end, contextLen);
+          context = doc.fullText.slice(from, to);
+          setMatchSel(m.count > 1 ? { kind: 'multiple', count: m.count } : { kind: 'matched', count: 1 });
         } else {
           setMatchSel({ kind: 'not-found' });
         }
@@ -288,9 +287,9 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
                       matchSel.kind === 'not-found' ? '⚠' : '✓'),
                     h('span', { style: { color: 'var(--dsw-alias-label-secondary)' } },
                       matchSel.kind === 'matched'
-                        ? ('已匹配到原文，使用上下文翻译' + (matchSel.score !== undefined ? '（重合 ' + Math.round(matchSel.score * 100) + '%）' : ''))
+                        ? '已匹配到原文，使用上下文翻译'
                         : matchSel.kind === 'multiple'
-                          ? ('在原文找到 ' + (matchSel.count ?? 0) + ' 处相近内容，使用最匹配处上下文' + (matchSel.score !== undefined ? '（重合 ' + Math.round(matchSel.score * 100) + '%）' : ''))
+                          ? ('该片段在原文出现 ' + (matchSel.count ?? 0) + ' 次，使用第一次出现的上下文')
                           : '未在原文中定位到该片段，直接翻译'),
                   )
                 : undefined,

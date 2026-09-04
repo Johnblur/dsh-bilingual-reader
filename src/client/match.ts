@@ -1,109 +1,80 @@
-// src/client/match.ts — tolerant fuzzy matching between a copied PDF selection
-// and the extracted document text.
-//
-// Why: pdfjs extraction splits words across lines / hyphens ("multi-\nhead",
-// "multi- head") and yields whitespace, case, and stray-character differences,
-// so an exact `indexOf` of a copied paragraph against fullText almost never
-// matches. We instead normalize, tokenize, and slide a window over the doc's
-// token stream, scoring overlap with the selection's tokens. This recovers the
-// right position for most real selections while still rejecting clear misses.
+// src/client/match.ts — match a copied PDF selection against the extracted text
+// by their LETTER SEQUENCES only (ignore punctuation / whitespace / hyphens /
+// case). Rationale: pdfjs extraction inserts hyphens & line breaks ("multi-\n
+// head") and varies spacing/punctuation, but the underlying letters are stable.
+// Comparing only lowercased letters makes "Transformer-based model",
+// "Transformer based model", and "Transformer-based model," collapse to the
+// same contiguous letter run - so an exact substring search on letter sequences
+// recovers the true position and, unlike a bag-of-words overlap, does NOT
+// over-report a long sentence (a long letter run appears once, not at every
+// sliding window).
 
-/** Merge hyphen/line-break splits and collapse whitespace, lowercased. */
+/** Merge hyphen/line-break splits and collapse whitespace, lowercased (for the
+ *  display copy of the selection / "原文"). */
 export function normalizeForMatch(s: string): string {
   return s
-    .replace(/[-\u2010\u2011]\s*\n\s*/g, '')   // "multi-\nhead" -> "multihead"
-    .replace(/[-\u2010\u2011]\s+/g, '')        // "multi- head" -> "multihead"
+    .replace(/[-\u2010\u2011]\s*\n\s*/g, '')
+    .replace(/[-\u2010\u2011]\s+/g, '')
     .replace(/\s+/g, ' ')
     .toLowerCase()
     .trim();
 }
 
-const TOKEN_RE = /[A-Za-z0-9]+|[\u3041-\u30ff\u3400-\u9fff\uac00-\ud7af\u3000-\u303f]/g;
-
-/** Tokenize a normalized string into word-ish tokens (Latin words; CJK per char). */
-function tokenize(normalized: string): string[] {
-  const tokens: string[] = [];
+/** Reduce to a lowercase contiguous letter/digit run, and return the map back
+ *  to original character offsets (one entry per kept letter). */
+function lettersOf(s: string): { letters: string; map: number[] } {
+  const letters: string[] = [];
+  const map: number[] = [];
+  const re = /[A-Za-z0-9]/g;
   let m: RegExpExecArray | null;
-  TOKEN_RE.lastIndex = 0;
-  while ((m = TOKEN_RE.exec(normalized)) !== null) tokens.push(m[0]);
-  return tokens;
-}
-
-/** Overlap score of a window token set against the selection tokens (multiset). */
-function overlapScore(windowTokens: string[], selTokens: string[]): number {
-  if (selTokens.length === 0) return 0;
-  const selSet = new Map<string, number>();
-  for (const t of selTokens) selSet.set(t, (selSet.get(t) ?? 0) + 1);
-  const used = new Map<string, number>();
-  let hit = 0;
-  for (const t of windowTokens) {
-    const have = used.get(t) ?? 0;
-    if (have < (selSet.get(t) ?? 0)) { used.set(t, have + 1); hit++; }
+  while ((m = re.exec(s)) !== null) {
+    letters.push(m[0].toLowerCase());
+    map.push(m.index);
   }
-  return hit / selTokens.length;
+  return { letters: letters.join(''), map };
 }
 
 export interface MatchResult {
-  /** Character offset of the best window's start within the normalized doc. */
+  /** Character offset (in the ORIGINAL fullText) where the matched run begins. */
   start: number;
-  /** Overlap score of the best window (0..1). */
-  score: number;
-  /** Number of distinct windows that cleared the threshold. */
+  /** Character offset (in the ORIGINAL fullText) one past the matched run. */
+  end: number;
+  /** How many times the selection's letter run appears. */
   count: number;
 }
 
 /**
- * Find the best window in `doc` whose token overlap with `sel` is highest.
- * Returns offsets in the NORMALIZED doc (so callers slice normalized text).
- * `null` when no window reaches `threshold`.
+ * Find every occurrence of the selection's letter sequence in the document's.
+ * `count` = number of true letter-sequence matches; `start`/`end` = the first
+ * occurrence's original-text offsets. Only an exact contiguous letter match
+ * counts, so a long sentence matches once (or genuinely multiple times if it
+ * truly appears more than once), never at every sliding window.
  */
-export function fuzzyMatch(doc: string, sel: string, threshold = 0.6): MatchResult | null {
-  const normDoc = normalizeForMatch(doc);
-  const normSel = normalizeForMatch(sel);
-  const selTokens = tokenize(normSel);
-  if (selTokens.length === 0) return null;
-  const docTokens = tokenize(normDoc);
-  if (docTokens.length === 0) return null;
-  const selCount = selTokens.length;
+export function matchLetters(doc: string, sel: string): MatchResult | null {
+  const selL = lettersOf(sel).letters;
+  if (!selL) return null;
+  const docL = lettersOf(doc);
+  if (!docL.letters) return null;
 
-  // Precompute each doc token's start offset in normDoc.
+  // Find all occurrences of sel's letter run in the doc's letter run.
   const starts: number[] = [];
-  TOKEN_RE.lastIndex = 0;
-  let m: RegExpExecArray | null;
-  while ((m = TOKEN_RE.exec(normDoc)) !== null) starts.push(m.index);
-
-  let best: { start: number; score: number } | null = null;
-  let clear = 0;
-
-  // Slide exact-length windows.
-  for (let i = 0; i + selCount <= docTokens.length; i++) {
-    const win = docTokens.slice(i, i + selCount);
-    const score = overlapScore(win, selTokens);
-    if (best === null || score > best.score) best = { start: starts[i], score };
-    if (score >= threshold) clear++;
+  let i = docL.letters.indexOf(selL);
+  while (i >= 0) {
+    starts.push(i);
+    i = docL.letters.indexOf(selL, i + 1);
   }
-  // Edge slack: windows of selCount±1 in case a boundary token is dropped.
-  if ((best === null || best.score < threshold) && selCount > 1) {
-    for (let d = -1; d <= 1; d++) {
-      const w = selCount + d;
-      if (w <= 0) continue;
-      for (let i = 0; i + w <= docTokens.length; i++) {
-        const win = docTokens.slice(i, i + w);
-        const score = overlapScore(win, selTokens);
-        if (best === null || score > best.score) best = { start: starts[i], score };
-        if (score >= threshold) clear++;
-      }
-    }
-  }
-
-  if (best === null || best.score < threshold) return null;
-  return { start: best.start, score: best.score, count: Math.max(1, clear) };
+  if (starts.length === 0) return null;
+  // The first occurrence spans letter indices [starts[0], starts[0]+selL.length).
+  return {
+    start: docL.map[starts[0]],
+    end: docL.map[starts[0] + selL.length - 1] + 1,
+    count: starts.length,
+  };
 }
 
-/** Compute the context slice around a matched start (in the normalized doc). */
-export function contextRange(start: number, sel: string, contextLen: number): { from: number; to: number } {
-  const selLen = normalizeForMatch(sel).length;
+/** Compute the context slice around a matched run (in the ORIGINAL text). */
+export function contextRange(start: number, end: number, contextLen: number): { from: number; to: number } {
   const from = Math.max(0, start - contextLen);
-  const to = start + selLen + contextLen;
+  const to = end + contextLen;
   return { from, to };
 }
