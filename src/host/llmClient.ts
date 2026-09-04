@@ -1,9 +1,9 @@
 // host/llmClient.ts — adapter over DSH's `ctx.llm` (LlmRuntime), following the proven
-// standalone pattern DSH itself uses (session-title-llm): deepFreeze(options) with
-// provider/model/messages/system/maxTokens/sessionId/purpose/signal, then
-// `ctx.llm.stream(options)` + BlockAssembler. ISOLATION: never appends to the main
+// standalone pattern DSH itself uses (session-title-llm): build an
+// options object with provider/model/messages/system/maxTokens/sessionId/purpose/signal,
+// then `ctx.llm.stream(options)` + BlockAssembler. ISOLATION: never appends to the main
 // conversation — it is an independent stream call.
-import { createUserMessage, createAssistantMessage, BlockAssembler, deepFreeze } from '@deepseek-ai/dsh-llm';
+import { createUserMessage, createAssistantMessage, BlockAssembler } from '@deepseek-ai/dsh-llm';
 import type { TranslateEvent } from '../types.js';
 
 export interface LlmMessage { role: 'system' | 'user' | 'assistant'; text: string }
@@ -46,7 +46,7 @@ export function createLlmGateway(llm: unknown): LlmGateway {
         ? createAssistantMessage({ content: [{ type: 'text', text: m.text }], source: { kind: 'plugin', plugin: 'dsh-bilingual-reader', provider: opts.provider, model: opts.model } })
         : createUserMessage({ content: [{ type: 'text', text: m.text }], source: { kind: 'plugin', plugin: 'dsh-bilingual-reader' } }),
     );
-    const options = deepFreeze({
+    const options = {
       provider: opts.provider,
       model: opts.model,
       messages,
@@ -55,7 +55,7 @@ export function createLlmGateway(llm: unknown): LlmGateway {
       sessionId: 'bilingual-reader',
       purpose: opts.purpose,
       signal: opts.signal,
-    });
+    };
     const assembler = new BlockAssembler();
     for await (const chunk of runtime.stream(options)) {
       assembler.push(chunk);
