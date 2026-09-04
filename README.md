@@ -46,6 +46,7 @@ dsh plugin add github:Johnblur/dsh-bilingual-reader
 ## 依赖与说明
 
 - 依赖 DSH 运行时注入的服务（`dsh-better-sidebar`、`@deepseek-ai/dsh-llm`）与 `pdfjs-dist`（主机端取文）。
+- **适配的 DSH 版本**：`@deepseek-ai/dsh-llm` **≥ 0.1.2-rc.1**（`deepFreeze` 已从 `dsh-llm` 的公开导出中移除，v1.0.2 起不再依赖它）。`dsh-better-sidebar` **≥ 0.17.1**。DSH 更新后若插件报 `does not provide an export named 'deepFreeze'`，需升级插件到 v1.0.2+。
 - **复用 DSH 现有模型与 API key**（无需额外 key），可用环境变量覆盖：
   - `DSH_BILINGUAL_PROVIDER`（默认 `deepseek-official`）
   - `DSH_BILINGUAL_MODEL`（默认 `deepseek-v4-flash-vision-exp`）

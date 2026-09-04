@@ -46,6 +46,7 @@ Then **fully quit the DSH Desktop** from the tray and relaunch.
 ## Dependencies & notes
 
 - Depends on DSH runtime services (`dsh-better-sidebar`, `@deepseek-ai/dsh-llm`) and `pdfjs-dist` (host-side text extraction).
+- **Compatible DSH version**: `@deepseek-ai/dsh-llm` **≥ 0.1.2-rc.1** (`deepFreeze` was dropped from `dsh-llm`'s public exports; v1.0.2 no longer needs it). `dsh-better-sidebar` **≥ 0.17.1**. If the plugin reports `does not provide an export named 'deepFreeze'` after a DSH update, upgrade the plugin to v1.0.2+.
 - **Reuses DSH's configured model & API key** (no extra key). Override with env vars:
   - `DSH_BILINGUAL_PROVIDER` (default `deepseek-official`)
   - `DSH_BILINGUAL_MODEL` (default `deepseek-v4-flash-vision-exp`)
