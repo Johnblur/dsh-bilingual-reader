@@ -166,9 +166,11 @@ export function queryTerms(
   // universal fallback terms carry it). TODO: revisit as a configurable policy.
   const direct = hits.filter((h) => h.directlyInDomain);
   const effective = direct.length > 0 ? direct : hits;
-  if (direct.length > 0 && hits.length > direct.length) {
-    warnings.push(`领域「${domain}」直接命中 ${direct.length} 条，已忽略 ${hits.length - direct.length} 条祖先继承项（dev 优先策略）。`);
-  }
+  // NOTE: "direct hit preferred over ancestor inheritance" is NORMAL policy
+  // behavior, not a warning — so we do NOT push it to `warnings`. Warnings are
+  // reserved for genuine data conflicts (same lang+form → multiple targets), the
+  // only case a maintainer must triage. (The direct-hit preference still shows
+  // up implicitly: the returned `hits` are already the effective set.)
 
   // Dev-stage conflict warning: same (domain-closure, lang, source form) with
   // DIFFERENT target translations → ambiguous. Report for developer triage.
