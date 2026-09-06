@@ -65,8 +65,12 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
     const [target, setTarget] = useState(initialTarget(isZhUI()));
     const [detected, setDetected] = useState('');
     // Domain (manual select or auto-detected). Persisted per session. '' =
-    // unattended (auto-detect only).
+    // auto-detect (LLM judges).
     const [domain, setDomain] = useState(loadLangBlob('dsh-bl.domain', ''));
+    // User-added domains (free text; no relations needed).
+    const [customDomains, setCustomDomains] = useState(loadLangBlob('dsh-bl.customDomains', []) as string[]);
+    const [showAddDomain, setShowAddDomain] = useState(false);
+    const [addDomainName, setAddDomainName] = useState('');
     // LLM-detected domain (from the whole extracted document text).
     const [detectedDomain, setDetectedDomain] = useState('');
     // Diagnostic strip collapsed by default; click to expand/collapse. Amber ⚠
@@ -116,6 +120,7 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
     useEffect(() => { saveLangBlob(LS_CONTEXT_LEN, contextLen); }, [contextLen]);
     useEffect(() => { saveLangBlob(LS_CUSTOM, customLangs); }, [customLangs]);
     useEffect(() => { saveLangBlob('dsh-bl.domain', domain); }, [domain]);
+    useEffect(() => { saveLangBlob('dsh-bl.customDomains', customDomains); }, [customDomains]);
 
     // Re-translate the current selection when the source/target language changes.
     // Skip the initial mount (so we don't duplicate the clipboard-triggered
@@ -280,11 +285,12 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
       const f = all.find((l) => l.code === code);
       return f ? f.name : code;
     };
-    const selectStyle = { height: 26, padding: '0 8px', border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 6, background: 'var(--dsw-alias-bg-layer-1)', color: 'var(--dsw-alias-label-primary)', fontSize: 13, outline: 'none' };
+    const selectStyle = { height: 24, padding: '0 4px', border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 6, background: 'var(--dsw-alias-bg-layer-1)', color: 'var(--dsw-alias-label-primary)', fontSize: 12, outline: 'none', maxWidth: 120 };
+    const rangeStyle = { width: 110, accentColor: '#555' };
 
-    // Domain options (a small per-user taxonomy; '' = auto-detect only).
-    const DOMAIN_OPTIONS = [
-      { value: '', label: '领域（不指定）' },
+    // Built-in domain set + user-added (free text). '' = auto-detect.
+    const BASE_DOMAINS = [
+      { value: '', label: '自动识别' },
       { value: 'machine-learning', label: '机器学习' },
       { value: 'deep-learning', label: '深度学习' },
       { value: 'nlp', label: '自然语言处理' },
@@ -297,36 +303,47 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
       { value: 'software-engineering', label: '软件工程' },
       { value: 'math', label: '数学' },
     ];
+    const DOMAIN_OPTIONS = [
+      ...BASE_DOMAINS,
+      ...customDomains.map((d: any) => ({ value: d, label: d })),
+    ];
     const domainLabel = (v: string): string => DOMAIN_OPTIONS.find((o) => o.value === v)?.label ?? v;
+    const addCustomDomain = (): void => {
+      const name = addDomainName.trim();
+      if (!name) return;
+      if (!customDomains.includes(name)) setCustomDomains((prev: any) => [...prev, name]);
+      setAddDomainName('');
+      setShowAddDomain(false);
+    };
 
     const bottom = h('div', { style: { flex: 1, overflow: 'auto', padding: 12, borderTop: '1px solid #e2e2e2', color: '#1f2329' } },
-      h('div', { style: { display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', color: '#555' } },
+      h('div', { style: { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', color: '#555' } },
         clipAvailable
-          ? h('span', { style: { fontSize: 13 } }, '✓ 已启用自动翻译')
-          : h('button', { onClick: () => void onClipboardTranslate(), className: BTN_CLS }, '翻译选中'),
-        h('label', { style: { fontSize: 13, color: '#555' } }, '源'),
-        h('select', { value: source, onChange: (e: any) => setSource(e.target.value), style: selectStyle },
+          ? h('span', { title: '已启用自动翻译', style: { fontSize: 14, color: 'var(--dsw-alias-state-success-primary)', lineHeight: 1 } }, '✓')
+          : h('button', { onClick: () => void onClipboardTranslate(), className: BTN_CLS, style: { fontSize: 12, padding: '2px 8px' } }, '翻译'),
+        h('select', { value: source, onChange: (e: any) => setSource(e.target.value), style: selectStyle, title: '源语言' },
           langOptions(true).map((l: any) => h('option', { value: l.code, key: l.code }, langLabel(l.code))),
           h('option', { value: '__custom', key: '__custom' }, '＋语言…'),
         ),
-        h('label', { style: { fontSize: 13, color: '#555' } }, '目标'),
-        h('select', { value: target, onChange: (e: any) => { const v = e.target.value; if (v === '__custom') { setShowAddLang(true); } else { setTarget(v); } }, style: selectStyle },
+        h('span', { style: { fontSize: 12, color: 'var(--dsw-alias-label-tertiary)' } }, '→'),
+        h('select', { value: target, onChange: (e: any) => { const v = e.target.value; if (v === '__custom') { setShowAddLang(true); } else { setTarget(v); } }, style: selectStyle, title: '目标语言' },
           langOptions(false).map((l: any) => h('option', { value: l.code, key: l.code }, langLabel(l.code))),
           h('option', { value: '__custom', key: '__custom' }, '＋语言…'),
         ),
-        h('label', { style: { fontSize: 13, color: '#555' } }, '领域'),
-        h('select', { value: domain, onChange: (e: any) => setDomain(e.target.value), style: selectStyle },
+        h('label', { style: { fontSize: 12, color: '#555' } }, '领域'),
+        h('select', { value: domain, onChange: (e: any) => { const v = e.target.value; if (v === '__custom') { setShowAddDomain(true); } else { setDomain(v); } }, style: selectStyle },
           DOMAIN_OPTIONS.map((o: any) => h('option', { value: o.value, key: o.value }, o.label)),
+          h('option', { value: '__custom', key: '__custom' }, '＋领域…'),
         ),
-        h('label', { style: { fontSize: 13, color: '#555' } }, '上下文'),
-        h('input', { type: 'range', min: 0, max: 800, step: 50, value: contextLen, onChange: (e: any) => setContextLen(Number(e.target.value)), style: { width: 160, accentColor: '#555' } }),
-        h('span', { style: { fontSize: 13, color: '#555' } }, contextLen + ' 字'),
+        h('label', { style: { fontSize: 12, color: '#555' } }, '上下文'),
+        h('input', { type: 'range', min: 0, max: 800, step: 50, value: contextLen, onChange: (e: any) => setContextLen(Number(e.target.value)), style: rangeStyle }),
+        h('span', { style: { fontSize: 12, color: '#555' } }, contextLen + ' 字'),
       ),
-      showAddLang
+      (showAddLang || showAddDomain)
         ? h('div', { style: { display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 } },
-            h('input', { value: addLangName, placeholder: '语言名（如 法语 / French）', onChange: (e: any) => setAddLangName(e.target.value), style: { ...inputBase, flex: 1 } }),
-            h('button', { onClick: addCustomLang, className: BTN_CLS }, '添加'),
-            h('button', { onClick: () => setShowAddLang(false), className: BTN_CLS }, '取消'),
+            h('input', { value: showAddDomain ? addDomainName : addLangName, placeholder: showAddDomain ? '领域名（如 经济学）' : '语言名（如 法语 / French）', onChange: (e: any) => { if (showAddDomain) setAddDomainName(e.target.value); else setAddLangName(e.target.value); }, style: { ...inputBase, flex: 1 } }),
+            h('button', { onClick: () => { if (showAddDomain) addCustomDomain(); else addCustomLang(); }, className: BTN_CLS }, '添加'),
+            h('button', { onClick: () => { setShowAddDomain(false); setShowAddLang(false); }, className: BTN_CLS }, '取消'),
           )
         : undefined,
       (() => {
