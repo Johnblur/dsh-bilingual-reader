@@ -3,6 +3,7 @@
 // calls the host /bilingual-reader/* routes (extract + isolated translate).
 // React is sourced from the factory's `require` (single DSH React instance).
 import { makeReader } from './reader.js';
+import { makeTermsView } from './termsView.js';
 import { BTN_CLS, inputBase, injectPluginStyles } from './styles.js';
 import type * as ReactNS from 'react';
 
@@ -39,6 +40,10 @@ export function makeClientFactory(): (require: (m: string) => unknown) => { inje
     const { useState, useEffect } = react;
     const h = react.createElement as any;
     const BilingualReader = makeReader({ h, useState, useEffect: react.useEffect as any, useCallback: react.useCallback as any, useRef: react.useRef as any });
+    const TermsView = makeTermsView({ h, useState, useEffect });
+    // Ref assigned in `apply` once betterSidebar is available; lets the reader's
+    // controller open the term/domain tab.
+    const openTermsTabRef = { current: undefined as undefined | (() => void) };
 
     const controller = {
       loadDocument: (file: string) => post('/bilingual-reader/extract', { path: file }),
@@ -52,6 +57,8 @@ export function makeClientFactory(): (require: (m: string) => unknown) => { inje
         return (r && typeof r.domain === 'string') ? r.domain : '';
       },
       queryTerms: async (req: any) => post('/bilingual-reader/query-terms', req),
+      getTerms: async () => post('/bilingual-reader/get-terms', {}),
+      openTermsTab: () => { openTermsTabRef.current?.(); },
       translateChunk: async (chunkId: string, _glossary: Record<string, string>, _signal: AbortSignal, emit: (e: any) => void) => {
         emit({ type: 'start', requestId: chunkId });
         const r = await post('/bilingual-reader/translate-chunk', { chunkId });
@@ -161,6 +168,21 @@ export function makeClientFactory(): (require: (m: string) => unknown) => { inje
           component: ReaderTab,
         }),
       );
+      // Term / domain management tab (read-only view). Drag it out of the sidebar
+      // to a wide free window. Opened programmatically from the reader's ⚙ button.
+      c.effect(() =>
+        bs.registerTab({
+          id: 'bilingual-reader-terms',
+          title: () => (isZh() ? '术语/领域' : 'Terms/Domain'),
+          icon: (size: number) => languageIcon(h, size),
+          single: true,
+          createTab: () => ({
+            tab: { id: 'bilingual-reader-terms', type: 'bilingual-reader-terms', title: '术语/领域' },
+          }),
+          component: () => h(TermsView, { controller }),
+        }),
+      );
+      openTermsTabRef.current = () => (bs as any).openTab?.({ type: 'bilingual-reader-terms' });
     };
 
     return { inject, apply };

@@ -24,6 +24,10 @@ export interface ReaderController {
   detectDomain?: (text: string) => Promise<string>;
   /** Query domain terms for injection + dev warnings. */
   queryTerms?: (req: { domain: string; sourceLang: string; targetLang?: string; text?: string }) => Promise<{ hits: any[]; warnings: string[] }>;
+  /** Open the term/domain management tab (draggable out to a wide free window). */
+  openTermsTab?: () => void;
+  /** Fetch the glossary + domain graph (for the term/domain management view). */
+  getTerms?: () => Promise<{ terms: any[]; graph: any }>;
 }
 
 interface ReactPieces {
@@ -71,6 +75,9 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
     // Domain (for term injection + context-free fallback). Persisted per session.
     const [domain, setDomain] = useState(loadLangBlob('dsh-bl.domain', ''));
     const [termWarnings, setTermWarnings] = useState([]);
+    // Diagnostic strip: collapsed by default; auto-expands when there's a warning,
+    // or on click. Shows detected language, domain, and match status in one line.
+    const [diagExpanded, setDiagExpanded] = useState(false);
     const reqSeq = useRef(0);
     // The auto-translate poll effect captures `doTranslate` from its own render
     // (old closure). Instead of adding source/target to that effect's deps (which
@@ -335,6 +342,9 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
         h('label', { style: { fontSize: 13, color: '#555' } }, '上下文'),
         h('input', { type: 'range', min: 0, max: 800, step: 50, value: contextLen, onChange: (e: any) => setContextLen(Number(e.target.value)), style: { width: 160, accentColor: '#555' } }),
         h('span', { style: { fontSize: 13, color: '#555' } }, contextLen + ' 字'),
+        controller?.openTermsTab
+          ? h('button', { onClick: () => controller?.openTermsTab?.(), className: BTN_CLS, style: { fontSize: 13 } }, '⚙ 术语/领域')
+          : undefined,
       ),
       showAddLang
         ? h('div', { style: { display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 } },
@@ -343,19 +353,47 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
             h('button', { onClick: () => setShowAddLang(false), className: BTN_CLS }, '取消'),
           )
         : undefined,
-      detected
-        ? h('div', { style: { marginTop: 8, fontSize: 12, color: 'var(--dsw-alias-label-tertiary)' } }, '识别为：' + detected)
-        : undefined,
-      detectedDomain && !domain
-        ? h('div', { style: { marginTop: 8, fontSize: 12, color: 'var(--dsw-alias-label-tertiary)' } },
-            'LLM 判断领域：' + domainLabel(detectedDomain))
-        : undefined,
-      domain && termWarnings.length > 0
-        ? h('div', { style: { marginTop: 8, fontSize: 12, color: 'var(--dsw-alias-state-warn-primary)', lineHeight: 1.6 } },
-            '术语提示（领域 ' + domainLabel(domain) + '）：',
-            termWarnings.map((w: string, i: number) => h('div', { key: i, style: { marginTop: 2 } }, '· ' + w)),
-          )
-        : undefined,
+      (() => {
+        // Diagnostic strip: collapses the several status lines into one summary
+        // row; click to expand; auto-expanded when there's a warning / not-found.
+        const hasWarn = termWarnings.length > 0 || matchSel.kind === 'not-found';
+        const open = diagExpanded || hasWarn;
+        const parts: string[] = [];
+        if (detected) parts.push('识别为 ' + detected.replace(/（.*?）$/, ''));
+        if (detectedDomain && !domain) parts.push('领域 ' + domainLabel(detectedDomain));
+        if (matchSel.kind === 'matched') parts.push('已匹配上下文');
+        else if (matchSel.kind === 'multiple') parts.push('出现 ' + (matchSel.count ?? 0) + ' 次，用第一次');
+        else if (matchSel.kind === 'not-found') parts.push('未定位到原文');
+        const summary = parts.join(' · ') || '暂无状态';
+        return h('div', { style: { marginTop: 8 } },
+          h('button', {
+            onClick: () => setDiagExpanded((v: any) => !v),
+            style: { display: 'inline-flex', alignItems: 'center', gap: 6, border: 'none', background: 'transparent', padding: 0, color: hasWarn ? 'var(--dsw-alias-state-warn-primary)' : 'var(--dsw-alias-label-tertiary)', fontSize: 12, cursor: 'pointer' },
+          },
+            h('span', { style: { fontSize: 12 } }, (hasWarn ? '⚠ ' : '') + summary),
+            h('span', { style: { fontSize: 10, opacity: 0.7 } }, open ? '▾' : '▸'),
+          ),
+          open
+            ? h('div', { style: { marginTop: 6, fontSize: 12, color: 'var(--dsw-alias-label-secondary)', lineHeight: 1.6 } },
+                detected ? h('div', {}, '识别为：' + detected) : undefined,
+                (detectedDomain && !domain) ? h('div', {}, 'LLM 判断领域：' + domainLabel(detectedDomain)) : undefined,
+                matchSel.kind !== 'empty'
+                  ? h('div', {}, matchSel.kind === 'matched'
+                      ? '已匹配到原文，使用上下文翻译'
+                      : matchSel.kind === 'multiple'
+                        ? ('该片段在原文出现 ' + (matchSel.count ?? 0) + ' 次，使用第一次出现的上下文')
+                        : '未在原文中定位到该片段，直接翻译')
+                  : undefined,
+                termWarnings.length > 0
+                  ? h('div', { style: { marginTop: 4, color: 'var(--dsw-alias-state-warn-primary)' } },
+                      '术语提示（领域 ' + domainLabel(domain) + '）：',
+                      termWarnings.map((w: string, i: number) => h('div', { key: i, style: { marginTop: 2 } }, '· ' + w)),
+                    )
+                  : undefined,
+              )
+            : undefined,
+        );
+      })(),
       h('div', { style: { marginTop: 10 } },
         sel
           ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 6 } },

@@ -20,6 +20,13 @@ export interface ReaderController {
         hits: any[];
         warnings: string[];
     }>;
+    /** Open the term/domain management tab (draggable out to a wide free window). */
+    openTermsTab?: () => void;
+    /** Fetch the glossary + domain graph (for the term/domain management view). */
+    getTerms?: () => Promise<{
+        terms: any[];
+        graph: any;
+    }>;
 }
 interface ReactPieces {
     h: (...args: any[]) => any;
