@@ -20,6 +20,8 @@ export interface ReaderController {
   translateSelection: (req: TranslateRequest, signal: AbortSignal, emit: (e: unknown) => void) => Promise<string>;
   /** Classify a snippet's language (may be a no-op when the LLM path is unused). */
   detectLanguage?: (text: string) => Promise<string>;
+  /** Query domain terms for injection + dev warnings. */
+  queryTerms?: (req: { domain: string; sourceLang: string; targetLang?: string; text?: string }) => Promise<{ hits: any[]; warnings: string[] }>;
 }
 
 interface ReactPieces {
@@ -62,6 +64,9 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
     const [source, setSource] = useState(initialSource());
     const [target, setTarget] = useState(initialTarget(isZhUI()));
     const [detected, setDetected] = useState('');
+    // Domain (for term injection + context-free fallback). Persisted per session.
+    const [domain, setDomain] = useState(loadLangBlob('dsh-bl.domain', ''));
+    const [termWarnings, setTermWarnings] = useState([]);
     const reqSeq = useRef(0);
     // The auto-translate poll effect captures `doTranslate` from its own render
     // (old closure). Instead of adding source/target to that effect's deps (which
@@ -71,9 +76,11 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
     const sourceRef = useRef(source);
     const targetRef = useRef(target);
     const customLangsRef = useRef(customLangs);
+    const domainRef = useRef(domain);
     sourceRef.current = source;
     targetRef.current = target;
     customLangsRef.current = customLangs;
+    domainRef.current = domain;
 
     const load = useCallback(async () => {
       if (!controller || !file) return;
@@ -88,6 +95,7 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
     useEffect(() => { saveLangBlob(LS_TARGET, target); }, [target]);
     useEffect(() => { saveLangBlob(LS_CONTEXT_LEN, contextLen); }, [contextLen]);
     useEffect(() => { saveLangBlob(LS_CUSTOM, customLangs); }, [customLangs]);
+    useEffect(() => { saveLangBlob('dsh-bl.domain', domain); }, [domain]);
 
     // Re-translate the current selection when the source/target language changes.
     // Skip the initial mount (so we don't duplicate the clipboard-triggered
@@ -158,9 +166,26 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
           setDetected('');
         }
       } catch { setDetected(''); }
+      // Domain term injection: when a domain is pinned, query the glossary for
+      // terms matching the selection and pass them to the translator + surface
+      // any dev warnings (conflicts/ambiguity). If no domain is set, skip.
+      let injectedTerms: { source: string; target?: string }[] = [];
+      let queryWarnings: string[] = [];
+      const domainNow = domainRef.current;
+      if (domainNow && controller.queryTerms && selText) {
+        try {
+          const q = await controller.queryTerms({ domain: domainNow, sourceLang: effSource || 'en', targetLang: tgt, text: selText });
+          injectedTerms = (Array.isArray(q?.hits) ? q.hits : [])
+            .filter((h: any) => h?.source && h?.target)
+            .map((h: any) => ({ source: String(h.source), target: String(h.target) }));
+          queryWarnings = Array.isArray(q?.warnings) ? q.warnings : [];
+          if (seq !== reqSeq.current) return;
+        } catch { injectedTerms = []; queryWarnings = []; }
+      }
+      setTermWarnings(queryWarnings);
       try {
         const res = await controller.translateSelection(
-          { kind: 'selection', selection: selText, context, glossary, source: effSource, target: tgt },
+          { kind: 'selection', selection: selText, context, glossary, source: effSource, target: tgt, domain: domainNow || undefined, terms: injectedTerms },
           new AbortController().signal, () => {},
         );
         // Only apply the result if this is still the latest request (avoid stale overwrites).
@@ -249,6 +274,23 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
     };
     const selectStyle = { height: 26, padding: '0 8px', border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 6, background: 'var(--dsw-alias-bg-layer-1)', color: 'var(--dsw-alias-label-primary)', fontSize: 13, outline: 'none' };
 
+    // Domain options (from the seed graph, flattened). '' = 不指定领域（不注入术语）。
+    const DOMAIN_OPTIONS = [
+      { value: '', label: '领域（不指定）' },
+      { value: 'machine-learning', label: '机器学习' },
+      { value: 'deep-learning', label: '深度学习' },
+      { value: 'nlp', label: '自然语言处理' },
+      { value: 'computer-vision', label: '计算机视觉' },
+      { value: 'reinforcement-learning', label: '强化学习' },
+      { value: 'biology', label: '生物学' },
+      { value: 'genetics', label: '遗传学' },
+      { value: 'physics', label: '物理学' },
+      { value: 'quantum-computing', label: '量子计算' },
+      { value: 'software-engineering', label: '软件工程' },
+      { value: 'math', label: '数学' },
+    ];
+    const domainLabel = (v: string): string => DOMAIN_OPTIONS.find((o) => o.value === v)?.label ?? v;
+
     const bottom = h('div', { style: { flex: 1, overflow: 'auto', padding: 12, borderTop: '1px solid #e2e2e2', color: '#1f2329' } },
       h('div', { style: { display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', color: '#555' } },
         clipAvailable
@@ -264,6 +306,10 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
           langOptions(false).map((l: any) => h('option', { value: l.code, key: l.code }, langLabel(l.code))),
           h('option', { value: '__custom', key: '__custom' }, '＋语言…'),
         ),
+        h('label', { style: { fontSize: 13, color: '#555' } }, '领域'),
+        h('select', { value: domain, onChange: (e: any) => setDomain(e.target.value), style: selectStyle },
+          DOMAIN_OPTIONS.map((o: any) => h('option', { value: o.value, key: o.value }, o.label)),
+        ),
         h('label', { style: { fontSize: 13, color: '#555' } }, '上下文'),
         h('input', { type: 'range', min: 0, max: 800, step: 50, value: contextLen, onChange: (e: any) => setContextLen(Number(e.target.value)), style: { width: 160, accentColor: '#555' } }),
         h('span', { style: { fontSize: 13, color: '#555' } }, contextLen + ' 字'),
@@ -277,6 +323,12 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
         : undefined,
       detected
         ? h('div', { style: { marginTop: 8, fontSize: 12, color: 'var(--dsw-alias-label-tertiary)' } }, '识别为：' + detected)
+        : undefined,
+      domain && termWarnings.length > 0
+        ? h('div', { style: { marginTop: 8, fontSize: 12, color: 'var(--dsw-alias-state-warn-primary)', lineHeight: 1.6 } },
+            '术语提示（领域 ' + domainLabel(domain) + '）：',
+            termWarnings.map((w: string, i: number) => h('div', { key: i, style: { marginTop: 2 } }, '· ' + w)),
+          )
         : undefined,
       h('div', { style: { marginTop: 10 } },
         sel

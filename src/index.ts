@@ -11,6 +11,8 @@ import { extractGlossary } from './host/glossary.js';
 import { createLlmGateway, type LlmGateway } from './host/llmClient.js';
 import { translateChunk, translateSelection, detectTextLanguage } from './host/translate.js';
 import { resolveModel } from './host/model.js';
+import { createTermStore, type TermStore } from './host/termStore.js';
+import { queryTerms, type TermEntry } from './shared/domain.js';
 import type { DocChunk, TranslateRequest } from './types.js';
 
 export const inject = ['llm', 'webServer'];
@@ -23,6 +25,13 @@ export function apply(ctx: { llm: unknown; webServer: unknown; effect: (fn: () =
   const nodeRequire = createRequire(import.meta.url);
   const pdfjsDir = path.dirname(nodeRequire.resolve('pdfjs-dist/package.json'));
   const ws = ctx.webServer as { register: (r: { kind: string; path: string; handler: (req: HttpReq, res: HttpRes) => void }) => () => void };
+
+  // Term store: the plugin's glossary + domain graph live on the HOST filesystem
+  // (per the plan) under ~/.dsh/dsh-bilingual-reader/. Seed is used on first run,
+  // persisted for subsequent sessions.
+  const dshHome = process.env.DSH_HOME ?? (typeof process !== 'undefined' ? process.env.USERPROFILE : '');
+  const termStore: TermStore = createTermStore(dshHome ?? '.');
+  void termStore.load();
 
   // single-document state (extract populates chunks; translate-chunk looks them up).
   // Scoped inside `apply` so a hot reload creates a fresh set and the old fiber's
@@ -123,6 +132,28 @@ export function apply(ctx: { llm: unknown; webServer: unknown; effect: (fn: () =
         const m = typeof body?.model === 'string' ? body.model : undefined;
         const lang = await detectTextLanguage(gateway, text, { provider: p, model: m });
         return json(res, 200, { lang });
+      }
+      // Query domain terms for a translation context (see shared/domain.ts).
+      if (pathname === '/bilingual-reader/query-terms' && req.method === 'POST') {
+        const domain = String(body?.domain ?? '');
+        const sourceLang = String(body?.sourceLang ?? 'en');
+        const targetLang = typeof body?.targetLang === 'string' ? body.targetLang : undefined;
+        const text = typeof body?.text === 'string' ? body.text : undefined;
+        if (!domain) return json(res, 400, { error: 'missing domain' });
+        const result = queryTerms(domain, sourceLang, text, termStore.graph, termStore.terms, targetLang);
+        return json(res, 200, result);
+      }
+      // Dev helper: read the current glossary + graph (for the management UI / debug).
+      if (pathname === '/bilingual-reader/get-terms' && req.method === 'GET') {
+        return json(res, 200, { terms: termStore.terms, graph: termStore.graph, dir: termStore.dir });
+      }
+      // Dev helper: replace the glossary (persisted to host filesystem).
+      if (pathname === '/bilingual-reader/save-terms' && req.method === 'POST') {
+        const terms = body?.terms;
+        if (!Array.isArray(terms)) return json(res, 400, { error: 'terms must be an array' });
+        termStore.terms = terms as TermEntry[] | any; // replaced wholesale; structure validated on query
+        await termStore.saveTerms();
+        return json(res, 200, { ok: true, count: termStore.terms.length, dir: termStore.dir });
       }
       return json(res, 404, { error: 'unknown route ' + pathname });
     } catch (e) {

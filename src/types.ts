@@ -41,6 +41,10 @@ export interface TranslateRequest {
   source?: string;
   /** Target language (updates the previous hardcoded '中文'). */
   target?: string;
+  /** Domain (for term injection + context-free fallback). */
+  domain?: string;
+  /** Terms injected for consistency (from query-terms): [{source, target}]. */
+  terms?: Array<{ source: string; target?: string }>;
   /** Optional override; falls back to the per-mode default (see model.ts). */
   provider?: string;
   model?: string;

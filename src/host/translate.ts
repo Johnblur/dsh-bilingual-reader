@@ -13,13 +13,23 @@ function sourceOf(source: string | undefined): string {
   return s ? s : '自动判断的原文语言';
 }
 
-const SYSTEM_FULLTEXT = (glossary: Record<string, string>, source: string | undefined, target: string) =>
-  `你是学术论文翻译助手。下面的内容语言是「${sourceOf(source)}」，请把它译成${target}。只输出译文，不要解释、不要保留原文。` +
-  glossaryNote(glossary);
+function injectedTermsNote(terms: TranslateRequest['terms']): string {
+  if (!terms || terms.length === 0) return '';
+  const map = terms.filter((t) => t.target).map((t) => `${t.source}=${t.target}`).join(', ');
+  return map ? `\n领域术语请保持一致：${map}` : '';
+}
 
-const SYSTEM_SELECTION = (glossary: Record<string, string>, source: string | undefined, target: string) =>
+function domainNote(domain: string | undefined): string {
+  return domain ? `\n【所属领域】${domain}` : '';
+}
+
+const SYSTEM_FULLTEXT = (glossary: Record<string, string>, source: string | undefined, target: string, domain?: string, terms?: TranslateRequest['terms']) =>
+  `你是学术论文翻译助手。下面的内容语言是「${sourceOf(source)}」，请把它译成${target}。只输出译文，不要解释、不要保留原文。` +
+  domainNote(domain) + injectedTermsNote(terms) + glossaryNote(glossary);
+
+const SYSTEM_SELECTION = (glossary: Record<string, string>, source: string | undefined, target: string, domain?: string, terms?: TranslateRequest['terms']) =>
   `你是学术论文翻译助手。请结合给出的“上下文”理解以下“选中片段”的含义，把选中片段从「${sourceOf(source)}」译成${target}。` +
-  `不要翻译上下文，只翻译选中片段；上下文仅用于确定用词。` + glossaryNote(glossary);
+  `不要翻译上下文，只翻译选中片段；上下文仅用于确定用词。` + domainNote(domain) + injectedTermsNote(terms) + glossaryNote(glossary);
 
 function glossaryNote(g: Record<string, string>): string {
   const keys = Object.keys(g);
@@ -40,7 +50,7 @@ export async function translateChunk(
   const { provider, model } = resolveModel({ ...req, kind: 'full-text' });
   const target = req.target ?? '中文';
   const messages: LlmMessage[] = [
-    { role: 'system', text: SYSTEM_FULLTEXT(req.glossary ?? {}, req.source, target) },
+    { role: 'system', text: SYSTEM_FULLTEXT(req.glossary ?? {}, req.source, target, req.domain, req.terms) },
     { role: 'user', text: chunk.heading ? `【标题】${chunk.heading}\n\n${chunk.text}` : chunk.text },
   ];
   emit({ type: 'start', requestId });
@@ -60,7 +70,7 @@ export async function translateSelection(
   const { provider, model } = resolveModel({ ...req, kind: 'selection' });
   const target = req.target ?? '中文';
   const messages: LlmMessage[] = [
-    { role: 'system', text: SYSTEM_SELECTION(req.glossary ?? {}, req.source, target) },
+    { role: 'system', text: SYSTEM_SELECTION(req.glossary ?? {}, req.source, target, req.domain, req.terms) },
     { role: 'user', text: `【上下文】\n${context}\n\n【选中片段】\n${selection}` },
   ];
   emit({ type: 'start', requestId });
