@@ -57,7 +57,7 @@ export function makeClientFactory(): (require: (m: string) => unknown) => { inje
         return (r && typeof r.domain === 'string') ? r.domain : '';
       },
       queryTerms: async (req: any) => post('/bilingual-reader/query-terms', req),
-      getTerms: async () => post('/bilingual-reader/get-terms', {}),
+      getTerms: async () => (await fetch('/bilingual-reader/get-terms')).json(),
       openTermsTab: () => { openTermsTabRef.current?.(); },
       translateChunk: async (chunkId: string, _glossary: Record<string, string>, _signal: AbortSignal, emit: (e: any) => void) => {
         emit({ type: 'start', requestId: chunkId });
