@@ -13,13 +13,17 @@ function sourceOf(source: string | undefined): string {
   return s ? s : '自动判断的原文语言';
 }
 
-const SYSTEM_FULLTEXT = (glossary: Record<string, string>, source: string | undefined, target: string) =>
+const SYSTEM_FULLTEXT = (glossary: Record<string, string>, source: string | undefined, target: string, domain?: string) =>
   `你是学术论文翻译助手。下面的内容语言是「${sourceOf(source)}」，请把它译成${target}。只输出译文，不要解释、不要保留原文。` +
-  glossaryNote(glossary);
+  domainNote(domain) + glossaryNote(glossary);
 
-const SYSTEM_SELECTION = (glossary: Record<string, string>, source: string | undefined, target: string) =>
+const SYSTEM_SELECTION = (glossary: Record<string, string>, source: string | undefined, target: string, domain?: string) =>
   `你是学术论文翻译助手。请结合给出的“上下文”理解以下“选中片段”的含义，把选中片段从「${sourceOf(source)}」译成${target}。` +
-  `不要翻译上下文，只翻译选中片段；上下文仅用于确定用词。` + glossaryNote(glossary);
+  `不要翻译上下文，只翻译选中片段；上下文仅用于确定用词。` + domainNote(domain) + glossaryNote(glossary);
+
+function domainNote(domain: string | undefined): string {
+  return domain ? `\n【所属领域】${domain}` : '';
+}
 
 function glossaryNote(g: Record<string, string>): string {
   const keys = Object.keys(g);
@@ -40,7 +44,7 @@ export async function translateChunk(
   const { provider, model } = resolveModel({ ...req, kind: 'full-text' });
   const target = req.target ?? '中文';
   const messages: LlmMessage[] = [
-    { role: 'system', text: SYSTEM_FULLTEXT(req.glossary ?? {}, req.source, target) },
+    { role: 'system', text: SYSTEM_FULLTEXT(req.glossary ?? {}, req.source, target, req.domain) },
     { role: 'user', text: chunk.heading ? `【标题】${chunk.heading}\n\n${chunk.text}` : chunk.text },
   ];
   emit({ type: 'start', requestId });
@@ -60,7 +64,7 @@ export async function translateSelection(
   const { provider, model } = resolveModel({ ...req, kind: 'selection' });
   const target = req.target ?? '中文';
   const messages: LlmMessage[] = [
-    { role: 'system', text: SYSTEM_SELECTION(req.glossary ?? {}, req.source, target) },
+    { role: 'system', text: SYSTEM_SELECTION(req.glossary ?? {}, req.source, target, req.domain) },
     { role: 'user', text: `【上下文】\n${context}\n\n【选中片段】\n${selection}` },
   ];
   emit({ type: 'start', requestId });
@@ -75,4 +79,24 @@ export async function detectTextLanguage(
 ): Promise<string> {
   const { provider, model } = resolveModel({ kind: 'selection', provider: overrides?.provider, model: overrides?.model });
   return llm.detectLanguage({ provider, model, text });
+}
+
+// --- Domain detection: classify a paper/snippet's field (no translation). ---
+// Returns a normalized domain slug (lowercase, dashes) or '' when unknown.
+export async function detectDomain(
+  llm: LlmGateway,
+  text: string,
+  overrides?: { provider?: string; model?: string },
+): Promise<string> {
+  const { provider, model } = resolveModel({ kind: 'selection', provider: overrides?.provider, model: overrides?.model });
+  const raw = await llm.classify({
+    provider,
+    model,
+    system:
+      'You are a paper-field classifier. Given a snippet from an academic paper, answer ONLY with the most specific domain, as a short English slug, e.g. "machine-learning", "deep-learning", "nlp", "computer-vision", "reinforcement-learning", "biology", "genetics", "physics", "quantum-computing", "software-engineering", "math", or "other". No explanation, no translation.',
+    user: text.slice(0, 4000),
+    purpose: 'domain-detect',
+  });
+  const slug = (raw || '').trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-');
+  return slug || '';
 }

@@ -26,6 +26,16 @@ export interface LlmGateway {
     text: string;
     signal?: AbortSignal;
   }): Promise<string>;
+  /** Generic one-shot classification: run a custom system+user prompt and return
+   *  the raw answer text (no UI emit). Used for domain detection. */
+  classify(opts: {
+    provider: string;
+    model: string;
+    system: string;
+    user: string;
+    signal?: AbortSignal;
+    purpose?: string;
+  }): Promise<string>;
 }
 
 export function createLlmGateway(llm: unknown): LlmGateway {
@@ -91,6 +101,20 @@ export function createLlmGateway(llm: unknown): LlmGateway {
       // Trim to the first 2-3 letter token that looks like a code.
       const m = /[A-Za-z]{2,3}/.exec(raw || '');
       return m ? m[0].toLowerCase() : (raw || '').toLowerCase();
+    },
+    async classify(opts) {
+      // Run a custom one-shot classification prompt and return the raw answer.
+      return runOnce({
+        provider: opts.provider,
+        model: opts.model,
+        messages: [
+          { role: 'system', text: opts.system },
+          { role: 'user', text: opts.user.slice(0, 4000) },
+        ],
+        signal: opts.signal,
+        purpose: opts.purpose ?? 'classify',
+        requestId: 'classify-' + Date.now(),
+      });
     },
   };
 }

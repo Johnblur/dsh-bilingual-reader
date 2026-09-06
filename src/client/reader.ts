@@ -20,6 +20,8 @@ export interface ReaderController {
   translateSelection: (req: TranslateRequest, signal: AbortSignal, emit: (e: unknown) => void) => Promise<string>;
   /** Classify a snippet's language (may be a no-op when the LLM path is unused). */
   detectLanguage?: (text: string) => Promise<string>;
+  /** Classify a paper/snippet's field/domain (shown when the domain is auto). */
+  detectDomain?: (text: string) => Promise<string>;
 }
 
 interface ReactPieces {
@@ -62,6 +64,14 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
     const [source, setSource] = useState(initialSource());
     const [target, setTarget] = useState(initialTarget(isZhUI()));
     const [detected, setDetected] = useState('');
+    // Domain (manual select or auto-detected). Persisted per session. '' =
+    // unattended (auto-detect only).
+    const [domain, setDomain] = useState(loadLangBlob('dsh-bl.domain', ''));
+    // LLM-detected domain (from the whole extracted document text).
+    const [detectedDomain, setDetectedDomain] = useState('');
+    // Diagnostic strip collapsed by default; click to expand/collapse. Amber ⚠
+    // when there's a warning (e.g. not-found match).
+    const [diagExpanded, setDiagExpanded] = useState(false);
     const reqSeq = useRef(0);
     // The auto-translate poll effect captures `doTranslate` from its own render
     // (old closure). Instead of adding source/target to that effect's deps (which
@@ -71,14 +81,31 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
     const sourceRef = useRef(source);
     const targetRef = useRef(target);
     const customLangsRef = useRef(customLangs);
+    const domainRef = useRef(domain);
+    const docDomainRef = useRef('');
     sourceRef.current = source;
     targetRef.current = target;
     customLangsRef.current = customLangs;
+    domainRef.current = domain;
 
     const load = useCallback(async () => {
       if (!controller || !file) return;
       const { text, glossary } = await controller.loadDocument(file);
       setDoc(text); setGloss(glossary);
+      // Domain detection: judged ONCE per document from the WHOLE extracted text
+      // (not a short selection, which would misjudge the field). Stored in a ref
+      // for the translate path; shown when the user leaves the dropdown blank.
+      const full = text?.fullText ?? '';
+      if (full && controller.detectDomain) {
+        try {
+          const d = await controller.detectDomain(full.slice(0, 8000));
+          const slug = (d || '').toLowerCase();
+          setDetectedDomain(slug);
+          docDomainRef.current = slug;
+        } catch { setDetectedDomain(''); docDomainRef.current = ''; }
+      } else {
+        setDetectedDomain(''); docDomainRef.current = '';
+      }
     }, [controller, file]);
 
     useEffect(() => { void load(); }, [load]);
@@ -88,6 +115,7 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
     useEffect(() => { saveLangBlob(LS_TARGET, target); }, [target]);
     useEffect(() => { saveLangBlob(LS_CONTEXT_LEN, contextLen); }, [contextLen]);
     useEffect(() => { saveLangBlob(LS_CUSTOM, customLangs); }, [customLangs]);
+    useEffect(() => { saveLangBlob('dsh-bl.domain', domain); }, [domain]);
 
     // Re-translate the current selection when the source/target language changes.
     // Skip the initial mount (so we don't duplicate the clipboard-triggered
@@ -158,9 +186,14 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
           setDetected('');
         }
       } catch { setDetected(''); }
+      // Effective domain: the user's manual choice wins; otherwise fall back to
+      // the DOCUMENT-level domain the LLM judged when the doc was loaded. Passed
+      // to the translator as context (it helps when the selection can't be
+      // matched in the text).
+      const effDomain = domainRef.current || docDomainRef.current || undefined;
       try {
         const res = await controller.translateSelection(
-          { kind: 'selection', selection: selText, context, glossary, source: effSource, target: tgt },
+          { kind: 'selection', selection: selText, context, glossary, source: effSource, target: tgt, domain: effDomain },
           new AbortController().signal, () => {},
         );
         // Only apply the result if this is still the latest request (avoid stale overwrites).
@@ -249,6 +282,23 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
     };
     const selectStyle = { height: 26, padding: '0 8px', border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 6, background: 'var(--dsw-alias-bg-layer-1)', color: 'var(--dsw-alias-label-primary)', fontSize: 13, outline: 'none' };
 
+    // Domain options (a small per-user taxonomy; '' = auto-detect only).
+    const DOMAIN_OPTIONS = [
+      { value: '', label: '领域（不指定）' },
+      { value: 'machine-learning', label: '机器学习' },
+      { value: 'deep-learning', label: '深度学习' },
+      { value: 'nlp', label: '自然语言处理' },
+      { value: 'computer-vision', label: '计算机视觉' },
+      { value: 'reinforcement-learning', label: '强化学习' },
+      { value: 'biology', label: '生物学' },
+      { value: 'genetics', label: '遗传学' },
+      { value: 'physics', label: '物理学' },
+      { value: 'quantum-computing', label: '量子计算' },
+      { value: 'software-engineering', label: '软件工程' },
+      { value: 'math', label: '数学' },
+    ];
+    const domainLabel = (v: string): string => DOMAIN_OPTIONS.find((o) => o.value === v)?.label ?? v;
+
     const bottom = h('div', { style: { flex: 1, overflow: 'auto', padding: 12, borderTop: '1px solid #e2e2e2', color: '#1f2329' } },
       h('div', { style: { display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', color: '#555' } },
         clipAvailable
@@ -264,6 +314,10 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
           langOptions(false).map((l: any) => h('option', { value: l.code, key: l.code }, langLabel(l.code))),
           h('option', { value: '__custom', key: '__custom' }, '＋语言…'),
         ),
+        h('label', { style: { fontSize: 13, color: '#555' } }, '领域'),
+        h('select', { value: domain, onChange: (e: any) => setDomain(e.target.value), style: selectStyle },
+          DOMAIN_OPTIONS.map((o: any) => h('option', { value: o.value, key: o.value }, o.label)),
+        ),
         h('label', { style: { fontSize: 13, color: '#555' } }, '上下文'),
         h('input', { type: 'range', min: 0, max: 800, step: 50, value: contextLen, onChange: (e: any) => setContextLen(Number(e.target.value)), style: { width: 160, accentColor: '#555' } }),
         h('span', { style: { fontSize: 13, color: '#555' } }, contextLen + ' 字'),
@@ -275,24 +329,46 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
             h('button', { onClick: () => setShowAddLang(false), className: BTN_CLS }, '取消'),
           )
         : undefined,
-      detected
-        ? h('div', { style: { marginTop: 8, fontSize: 12, color: 'var(--dsw-alias-label-tertiary)' } }, '识别为：' + detected)
-        : undefined,
+      (() => {
+        // Diagnostic strip: one-line summary of detected language · domain ·
+        // match status. Click to expand/collapse (user-controlled). A not-found
+        // match tints it amber with ⚠, but keeps it collapsed.
+        const hasWarn = matchSel.kind === 'not-found';
+        const open = diagExpanded;
+        const parts: string[] = [];
+        if (detected) parts.push('识别为 ' + detected.replace(/（.*?）$/, ''));
+        if (detectedDomain && !domain) parts.push('领域 ' + domainLabel(detectedDomain));
+        if (domain) parts.push('领域 ' + domainLabel(domain));
+        if (matchSel.kind === 'matched') parts.push('已匹配上下文');
+        else if (matchSel.kind === 'multiple') parts.push('出现 ' + (matchSel.count ?? 0) + ' 次，用第一次');
+        else if (matchSel.kind === 'not-found') parts.push('未定位到原文');
+        const summary = parts.join(' · ') || '暂无状态';
+        return h('div', { style: { marginTop: 8 } },
+          h('button', {
+            onClick: () => setDiagExpanded((v: any) => !v),
+            style: { display: 'inline-flex', alignItems: 'center', gap: 6, border: 'none', background: 'transparent', padding: 0, color: hasWarn ? 'var(--dsw-alias-state-warn-primary)' : 'var(--dsw-alias-label-tertiary)', fontSize: 12, cursor: 'pointer' },
+          },
+            h('span', { style: { fontSize: 12 } }, (hasWarn ? '⚠ ' : '') + summary),
+            h('span', { style: { fontSize: 10, opacity: 0.7 } }, open ? '▾' : '▸'),
+          ),
+          open
+            ? h('div', { style: { marginTop: 6, fontSize: 12, color: 'var(--dsw-alias-label-secondary)', lineHeight: 1.6 } },
+                detected ? h('div', {}, '识别为：' + detected) : undefined,
+                (detectedDomain && !domain) ? h('div', {}, 'LLM 判断领域：' + domainLabel(detectedDomain)) : undefined,
+                matchSel.kind !== 'empty'
+                  ? h('div', {}, matchSel.kind === 'matched'
+                      ? '已匹配到原文，使用上下文翻译'
+                      : matchSel.kind === 'multiple'
+                        ? ('该片段在原文出现 ' + (matchSel.count ?? 0) + ' 次，使用第一次出现的上下文')
+                        : '未在原文中定位到该片段，直接翻译')
+                  : undefined,
+              )
+            : undefined,
+        );
+      })(),
       h('div', { style: { marginTop: 10 } },
         sel
           ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 6 } },
-              matchSel.kind !== 'empty'
-                ? h('div', { style: { display: 'flex', gap: 6, alignItems: 'center', fontSize: 12 } },
-                    h('span', { style: { color: matchSel.kind === 'not-found' ? 'var(--dsw-alias-state-error-primary)' : 'var(--dsw-alias-state-success-primary)' } },
-                      matchSel.kind === 'not-found' ? '⚠' : '✓'),
-                    h('span', { style: { color: 'var(--dsw-alias-label-secondary)' } },
-                      matchSel.kind === 'matched'
-                        ? '已匹配到原文，使用上下文翻译'
-                        : matchSel.kind === 'multiple'
-                          ? ('该片段在原文出现 ' + (matchSel.count ?? 0) + ' 次，使用第一次出现的上下文')
-                          : '未在原文中定位到该片段，直接翻译'),
-                  )
-                : undefined,
               h('div', { style: { color: '#666', fontSize: 13, maxHeight: 130, overflow: 'auto' } }, '原文：' + sel.selection),
               h('div', { style: { display: 'flex', gap: 8, alignItems: 'flex-start' } },
                 h('div', { style: { flex: 1, lineHeight: 1.7, color: selError ? '#e53e3e' : '#1f2329' } }, selResult || '翻译中…'),

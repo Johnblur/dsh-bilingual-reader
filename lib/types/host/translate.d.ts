@@ -6,3 +6,7 @@ export declare function detectTextLanguage(llm: LlmGateway, text: string, overri
     provider?: string;
     model?: string;
 }): Promise<string>;
+export declare function detectDomain(llm: LlmGateway, text: string, overrides?: {
+    provider?: string;
+    model?: string;
+}): Promise<string>;

@@ -8,6 +8,8 @@ export interface ReaderController {
     translateSelection: (req: TranslateRequest, signal: AbortSignal, emit: (e: unknown) => void) => Promise<string>;
     /** Classify a snippet's language (may be a no-op when the LLM path is unused). */
     detectLanguage?: (text: string) => Promise<string>;
+    /** Classify a paper/snippet's field/domain (shown when the domain is auto). */
+    detectDomain?: (text: string) => Promise<string>;
 }
 interface ReactPieces {
     h: (...args: any[]) => any;

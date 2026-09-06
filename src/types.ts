@@ -41,6 +41,8 @@ export interface TranslateRequest {
   source?: string;
   /** Target language (updates the previous hardcoded '中文'). */
   target?: string;
+  /** Domain (field of the paper, passed as context to the translator). */
+  domain?: string;
   /** Optional override; falls back to the per-mode default (see model.ts). */
   provider?: string;
   model?: string;

@@ -21,5 +21,15 @@ export interface LlmGateway {
         text: string;
         signal?: AbortSignal;
     }): Promise<string>;
+    /** Generic one-shot classification: run a custom system+user prompt and return
+     *  the raw answer text (no UI emit). Used for domain detection. */
+    classify(opts: {
+        provider: string;
+        model: string;
+        system: string;
+        user: string;
+        signal?: AbortSignal;
+        purpose?: string;
+    }): Promise<string>;
 }
 export declare function createLlmGateway(llm: unknown): LlmGateway;
