@@ -81,6 +81,7 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
     const targetRef = useRef(target);
     const customLangsRef = useRef(customLangs);
     const domainRef = useRef(domain);
+    const docDomainRef = useRef('');
     sourceRef.current = source;
     targetRef.current = target;
     customLangsRef.current = customLangs;
@@ -90,6 +91,21 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
       if (!controller || !file) return;
       const { text, glossary } = await controller.loadDocument(file);
       setDoc(text); setGloss(glossary);
+      // Domain detection runs ONCE per document, on the whole extracted text —
+      // not on a short selection (which would misjudge the field). Result is
+      // stored in a ref so the translate path can use it; the UI shows it when
+      // the user left the domain dropdown unspecified.
+      const full = text?.fullText ?? '';
+      if (full && controller.detectDomain) {
+        try {
+          const d = await controller.detectDomain(full.slice(0, 8000));
+          const slug = (d || '').toLowerCase();
+          setDetectedDomain(slug);
+          docDomainRef.current = slug;
+        } catch { setDetectedDomain(''); docDomainRef.current = ''; }
+      } else {
+        setDetectedDomain(''); docDomainRef.current = '';
+      }
     }, [controller, file]);
 
     useEffect(() => { void load(); }, [load]);
@@ -170,15 +186,16 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
           setDetected('');
         }
       } catch { setDetected(''); }
-      // Domain term injection: when a domain is pinned, query the glossary for
-      // terms matching the selection and pass them to the translator + surface
-      // any dev warnings (conflicts/ambiguity). If no domain is set, skip.
+      // Effective domain: the user's pinned choice wins; otherwise fall back to
+      // the DOCUMENT-level domain the LLM judged when the doc was loaded (not
+      // the selection). Inject terms when a domain is active.
+      const userDomain = domainRef.current;
+      const effDomain = userDomain || docDomainRef.current || undefined;
       let injectedTerms: { source: string; target?: string }[] = [];
       let queryWarnings: string[] = [];
-      const domainNow = domainRef.current;
-      if (domainNow && controller.queryTerms && selText) {
+      if (effDomain && controller.queryTerms && selText) {
         try {
-          const q = await controller.queryTerms({ domain: domainNow, sourceLang: effSource || 'en', targetLang: tgt, text: selText });
+          const q = await controller.queryTerms({ domain: effDomain, sourceLang: effSource || 'en', targetLang: tgt, text: selText });
           injectedTerms = (Array.isArray(q?.hits) ? q.hits : [])
             .filter((h: any) => h?.source && h?.target)
             .map((h: any) => ({ source: String(h.source), target: String(h.target) }));
@@ -186,20 +203,7 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
           if (seq !== reqSeq.current) return;
         } catch { injectedTerms = []; queryWarnings = []; }
       }
-      // When the user leaves the domain unspecified, still ask the LLM to judge
-      // it and surface the result (so they can decide whether to pin it). The
-      // detected domain is also passed to the translator as context.
-      let effDomain = domainNow;
-      let detectedD = '';
-      if (!domainNow && controller.detectDomain && selText) {
-        try {
-          const d = await controller.detectDomain(selText);
-          detectedD = d || '';
-          effDomain = d || undefined;
-          if (seq !== reqSeq.current) return;
-        } catch { detectedD = ''; }
-      }
-      setDetectedDomain(detectedD);
+      setDetectedDomain(userDomain ? '' : docDomainRef.current);
       setTermWarnings(queryWarnings);
       try {
         const res = await controller.translateSelection(
