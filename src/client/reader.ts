@@ -355,9 +355,11 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
         : undefined,
       (() => {
         // Diagnostic strip: collapses the several status lines into one summary
-        // row; click to expand; auto-expanded when there's a warning / not-found.
+        // row; click to expand/collapse (entirely user-controlled). A warning
+        // (term conflict / not-found) turns the row amber with a ⚠ icon, but does
+        // NOT auto-expand — it stays a single collapsed line until clicked.
         const hasWarn = termWarnings.length > 0 || matchSel.kind === 'not-found';
-        const open = diagExpanded || hasWarn;
+        const open = diagExpanded;
         const parts: string[] = [];
         if (detected) parts.push('识别为 ' + detected.replace(/（.*?）$/, ''));
         if (detectedDomain && !domain) parts.push('领域 ' + domainLabel(detectedDomain));
@@ -397,18 +399,6 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
       h('div', { style: { marginTop: 10 } },
         sel
           ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 6 } },
-              matchSel.kind !== 'empty'
-                ? h('div', { style: { display: 'flex', gap: 6, alignItems: 'center', fontSize: 12 } },
-                    h('span', { style: { color: matchSel.kind === 'not-found' ? 'var(--dsw-alias-state-error-primary)' : 'var(--dsw-alias-state-success-primary)' } },
-                      matchSel.kind === 'not-found' ? '⚠' : '✓'),
-                    h('span', { style: { color: 'var(--dsw-alias-label-secondary)' } },
-                      matchSel.kind === 'matched'
-                        ? '已匹配到原文，使用上下文翻译'
-                        : matchSel.kind === 'multiple'
-                          ? ('该片段在原文出现 ' + (matchSel.count ?? 0) + ' 次，使用第一次出现的上下文')
-                          : '未在原文中定位到该片段，直接翻译'),
-                  )
-                : undefined,
               h('div', { style: { color: '#666', fontSize: 13, maxHeight: 130, overflow: 'auto' } }, '原文：' + sel.selection),
               h('div', { style: { display: 'flex', gap: 8, alignItems: 'flex-start' } },
                 h('div', { style: { flex: 1, lineHeight: 1.7, color: selError ? '#e53e3e' : '#1f2329' } }, selResult || '翻译中…'),
