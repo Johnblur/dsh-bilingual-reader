@@ -9,7 +9,7 @@ import { extractPdf } from './host/pdf.js';
 import { chunkDocument } from './host/chunk.js';
 import { extractGlossary } from './host/glossary.js';
 import { createLlmGateway, type LlmGateway } from './host/llmClient.js';
-import { translateChunk, translateSelection, detectTextLanguage } from './host/translate.js';
+import { translateChunk, translateSelection, detectTextLanguage, detectDomain } from './host/translate.js';
 import { resolveModel } from './host/model.js';
 import { createTermStore, type TermStore } from './host/termStore.js';
 import { queryTerms, type TermEntry } from './shared/domain.js';
@@ -132,6 +132,15 @@ export function apply(ctx: { llm: unknown; webServer: unknown; effect: (fn: () =
         const m = typeof body?.model === 'string' ? body.model : undefined;
         const lang = await detectTextLanguage(gateway, text, { provider: p, model: m });
         return json(res, 200, { lang });
+      }
+      // Classify a snippet's field/domain. Shown to the user when the domain is
+      // left "unspecified", so they can decide whether to pin it.
+      if (pathname === '/bilingual-reader/detect-domain' && req.method === 'POST') {
+        const text = String(body?.text ?? '');
+        const p = typeof body?.provider === 'string' ? body.provider : undefined;
+        const m = typeof body?.model === 'string' ? body.model : undefined;
+        const domain = await detectDomain(gateway, text, { provider: p, model: m });
+        return json(res, 200, { domain });
       }
       // Query domain terms for a translation context (see shared/domain.ts).
       if (pathname === '/bilingual-reader/query-terms' && req.method === 'POST') {

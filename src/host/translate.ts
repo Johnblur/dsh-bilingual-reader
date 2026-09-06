@@ -86,3 +86,23 @@ export async function detectTextLanguage(
   const { provider, model } = resolveModel({ kind: 'selection', provider: overrides?.provider, model: overrides?.model });
   return llm.detectLanguage({ provider, model, text });
 }
+
+// --- Domain detection: classify a paper/snippet's field (no translation). ---
+// Returns a normalized domain label (lowercase-ish) or '' when unknown.
+export async function detectDomain(
+  llm: LlmGateway,
+  text: string,
+  overrides?: { provider?: string; model?: string },
+): Promise<string> {
+  const { provider, model } = resolveModel({ kind: 'selection', provider: overrides?.provider, model: overrides?.model });
+  const raw = await llm.classify({
+    provider,
+    model,
+    system:
+      'You are a paper-field classifier. Given a snippet from an academic paper, answer ONLY with the most specific domain, as a short English slug, e.g. "machine-learning", "deep-learning", "nlp", "computer-vision", "reinforcement-learning", "biology", "genetics", "physics", "quantum-computing", "software-engineering", "math", or "other". No explanation, no translation.',
+    user: text.slice(0, 4000),
+    purpose: 'domain-detect',
+  });
+  const slug = (raw || '').trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-');
+  return slug || '';
+}

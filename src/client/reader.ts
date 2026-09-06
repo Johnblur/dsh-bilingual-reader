@@ -20,6 +20,8 @@ export interface ReaderController {
   translateSelection: (req: TranslateRequest, signal: AbortSignal, emit: (e: unknown) => void) => Promise<string>;
   /** Classify a snippet's language (may be a no-op when the LLM path is unused). */
   detectLanguage?: (text: string) => Promise<string>;
+  /** Classify a snippet's field/domain (shown when the domain is unspecified). */
+  detectDomain?: (text: string) => Promise<string>;
   /** Query domain terms for injection + dev warnings. */
   queryTerms?: (req: { domain: string; sourceLang: string; targetLang?: string; text?: string }) => Promise<{ hits: any[]; warnings: string[] }>;
 }
@@ -64,6 +66,8 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
     const [source, setSource] = useState(initialSource());
     const [target, setTarget] = useState(initialTarget(isZhUI()));
     const [detected, setDetected] = useState('');
+    // LLM-detected domain (shown when the user leaves the domain unspecified).
+    const [detectedDomain, setDetectedDomain] = useState('');
     // Domain (for term injection + context-free fallback). Persisted per session.
     const [domain, setDomain] = useState(loadLangBlob('dsh-bl.domain', ''));
     const [termWarnings, setTermWarnings] = useState([]);
@@ -182,10 +186,24 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
           if (seq !== reqSeq.current) return;
         } catch { injectedTerms = []; queryWarnings = []; }
       }
+      // When the user leaves the domain unspecified, still ask the LLM to judge
+      // it and surface the result (so they can decide whether to pin it). The
+      // detected domain is also passed to the translator as context.
+      let effDomain = domainNow;
+      let detectedD = '';
+      if (!domainNow && controller.detectDomain && selText) {
+        try {
+          const d = await controller.detectDomain(selText);
+          detectedD = d || '';
+          effDomain = d || undefined;
+          if (seq !== reqSeq.current) return;
+        } catch { detectedD = ''; }
+      }
+      setDetectedDomain(detectedD);
       setTermWarnings(queryWarnings);
       try {
         const res = await controller.translateSelection(
-          { kind: 'selection', selection: selText, context, glossary, source: effSource, target: tgt, domain: domainNow || undefined, terms: injectedTerms },
+          { kind: 'selection', selection: selText, context, glossary, source: effSource, target: tgt, domain: effDomain, terms: injectedTerms },
           new AbortController().signal, () => {},
         );
         // Only apply the result if this is still the latest request (avoid stale overwrites).
@@ -323,6 +341,10 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
         : undefined,
       detected
         ? h('div', { style: { marginTop: 8, fontSize: 12, color: 'var(--dsw-alias-label-tertiary)' } }, '识别为：' + detected)
+        : undefined,
+      detectedDomain && !domain
+        ? h('div', { style: { marginTop: 8, fontSize: 12, color: 'var(--dsw-alias-label-tertiary)' } },
+            'LLM 判断领域：' + domainLabel(detectedDomain))
         : undefined,
       domain && termWarnings.length > 0
         ? h('div', { style: { marginTop: 8, fontSize: 12, color: 'var(--dsw-alias-state-warn-primary)', lineHeight: 1.6 } },

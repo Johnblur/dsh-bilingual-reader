@@ -47,6 +47,10 @@ export function makeClientFactory(): (require: (m: string) => unknown) => { inje
         const r = await post('/bilingual-reader/detect-language', { text });
         return (r && typeof r.lang === 'string') ? r.lang : '';
       },
+      detectDomain: async (text: string) => {
+        const r = await post('/bilingual-reader/detect-domain', { text });
+        return (r && typeof r.domain === 'string') ? r.domain : '';
+      },
       queryTerms: async (req: any) => post('/bilingual-reader/query-terms', req),
       translateChunk: async (chunkId: string, _glossary: Record<string, string>, _signal: AbortSignal, emit: (e: any) => void) => {
         emit({ type: 'start', requestId: chunkId });
