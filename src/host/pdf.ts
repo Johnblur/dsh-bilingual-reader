@@ -7,17 +7,29 @@
 // not reliably restore order. Removing it keeps fullText in true reading order,
 // which matches the copied selection correctly.
 import { promises as fs } from 'node:fs';
+import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
 import type { DocumentText } from '../types.js';
-// Use pdfjs's LEGACY build: it is the one pdfjs documents for Node ("Please use
-// the `legacy` build in Node.js environments"). The modern build expects browser
-// globals such as DOMMatrix/Path2D and aborts the load where they are missing —
-// and the DSH >= 2.0.9 host runs in an Electron utilityProcess, not a browser.
-// The legacy build polyfills exactly those globals, and its text output is
-// byte-identical (verified across every PDF in the library). The browser-facing
-// /pdf.mjs and /pdf.worker.mjs routes in index.ts must keep serving the MODERN
-// build — only this Node-side import changes.
+// Use pdfjs's LEGACY build: it is the one pdfjs documents for non-browser hosts,
+// and it polyfills the DOM globals (DOMMatrix, Path2D) the modern build assumes.
+// Text output is identical (verified on every PDF in the library). The
+// browser-facing /pdf.mjs and /pdf.worker.mjs routes in index.ts must keep
+// serving the MODERN build — only this Node-side import changes.
 // eslint-disable-next-line import/no-unresolved
-import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
+import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist/legacy/build/pdf.mjs';
+
+// pdfjs decides whether it is on Node with:
+//   !(process.versions.electron && process.type && process.type !== 'browser')
+// The DSH >= 2.0.9 host runs inside an Electron utilityProcess, where
+// process.type === 'utility', so pdfjs concludes it is in a BROWSER. It then
+// reads PDFWorker.workerSrc — which THROWS when unset, and it does so BEFORE the
+// surrounding try/catch can fall back to the fake worker, so every extraction
+// failed with 'No "GlobalWorkerOptions.workerSrc" specified.'. Point it at the
+// matching worker file as an absolute file URL: the fake worker is loaded with a
+// dynamic import, so a bare specifier or a cwd-relative path would not resolve.
+GlobalWorkerOptions.workerSrc = pathToFileURL(
+  createRequire(import.meta.url).resolve('pdfjs-dist/legacy/build/pdf.worker.mjs'),
+).href;
 
 interface TextItem { str: string; transform: number[]; width: number; height: number }
 
