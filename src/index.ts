@@ -9,10 +9,10 @@ import { extractPdf } from './host/pdf.js';
 import { chunkDocument } from './host/chunk.js';
 import { extractGlossary } from './host/glossary.js';
 import { createLlmGateway, type LlmGateway } from './host/llmClient.js';
-import { translateChunk, translateSelection, detectTextLanguage, detectDomain } from './host/translate.js';
+import { translateSelection, detectTextLanguage, detectDomain } from './host/translate.js';
 import { resolveModel } from './host/model.js';
 import { startClipboardWatcher, type ClipboardWatcher } from './host/clipboard.js';
-import type { DocChunk, TranslateRequest } from './types.js';
+import type { TranslateRequest } from './types.js';
 
 export const inject = ['llm', 'webServer'];
 
@@ -25,10 +25,9 @@ export function apply(ctx: { llm: unknown; webServer: unknown; effect: (fn: () =
   const pdfjsDir = path.dirname(nodeRequire.resolve('pdfjs-dist/package.json'));
   const ws = ctx.webServer as { register: (r: { kind: string; path: string; handler: (req: HttpReq, res: HttpRes) => void }) => () => void };
 
-  // single-document state (extract populates chunks; translate-chunk looks them up).
+  // Single-document state: the extracted glossary is reused by /translate-selection.
   // Scoped inside `apply` so a hot reload creates a fresh set and the old fiber's
   // route disposer (see below) stops the stale one from being reachable.
-  let chunks: DocChunk[] = [];
   let glossary: Record<string, string> = {};
 
   // OS-clipboard watcher (no Electron): started lazily on the first clipboard
@@ -117,16 +116,11 @@ export function apply(ctx: { llm: unknown; webServer: unknown; effect: (fn: () =
       if (pathname === '/bilingual-reader/extract' && req.method === 'POST') {
         const file = String(body?.path ?? '');
         const text = await extractPdf(file);
-        chunks = chunkDocument(text);
-        glossary = extractGlossary(chunks);
-        return json(res, 200, { text, chunks, glossary });
-      }
-      if (pathname === '/bilingual-reader/translate-chunk' && req.method === 'POST') {
-        const chunkId = String(body?.chunkId ?? '');
-        const chunk = chunks.find((c) => c.id === chunkId);
-        if (!chunk) return json(res, 404, { error: 'chunk not found: ' + chunkId });
-        const out = await translateChunk(gateway, chunk, { kind: 'full-text', glossary, target: '中文' }, new AbortController().signal, () => {}, chunkId);
-        return json(res, 200, { requestId: chunkId, text: out });
+        // Only `text` and `glossary` travel back. Returning the chunks too used to
+        // send the document twice — a PDF has no markdown headings, so the single
+        // chunk holds the entire fullText verbatim.
+        glossary = extractGlossary(chunkDocument(text));
+        return json(res, 200, { text, glossary });
       }
       if (pathname === '/bilingual-reader/translate-selection' && req.method === 'POST') {
         const reqBody = body as unknown as TranslateRequest & { selection?: string; context?: string };

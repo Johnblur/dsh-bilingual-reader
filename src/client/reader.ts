@@ -16,7 +16,7 @@ import {
 } from './lang.js';
 
 export interface ReaderController {
-  loadDocument: (file: string) => Promise<{ text: DocumentText; chunks: unknown[]; glossary: Record<string, string> }>;
+  loadDocument: (file: string) => Promise<{ text: DocumentText; glossary: Record<string, string> }>;
   translateSelection: (req: TranslateRequest, signal: AbortSignal, emit: (e: unknown) => void) => Promise<string>;
   /** Classify a snippet's language (may be a no-op when the LLM path is unused). */
   detectLanguage?: (text: string) => Promise<string>;

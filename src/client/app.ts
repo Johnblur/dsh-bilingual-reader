@@ -67,12 +67,6 @@ export function makeClientFactory(): (require: (m: string) => unknown) => { inje
         const r = await post('/bilingual-reader/detect-domain', { text });
         return (r && typeof r.domain === 'string') ? r.domain : '';
       },
-      translateChunk: async (chunkId: string, _glossary: Record<string, string>, _signal: AbortSignal, emit: (e: any) => void) => {
-        emit({ type: 'start', requestId: chunkId });
-        const r = await post('/bilingual-reader/translate-chunk', { chunkId });
-        if (r && typeof r.text === 'string') { emit({ type: 'done', requestId: chunkId, full: r.text }); return r.text; }
-        throw new Error((r && r.error) || 'translate-chunk failed');
-      },
       translateSelection: async (req: any, _signal: AbortSignal, _emit: (e: any) => void) => {
         const r = await post('/bilingual-reader/translate-selection', req);
         if (r && typeof r.text === 'string') return r.text;

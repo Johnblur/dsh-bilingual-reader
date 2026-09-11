@@ -2,7 +2,6 @@ import type { DocumentText, TranslateRequest } from '../types.js';
 export interface ReaderController {
     loadDocument: (file: string) => Promise<{
         text: DocumentText;
-        chunks: unknown[];
         glossary: Record<string, string>;
     }>;
     translateSelection: (req: TranslateRequest, signal: AbortSignal, emit: (e: unknown) => void) => Promise<string>;
