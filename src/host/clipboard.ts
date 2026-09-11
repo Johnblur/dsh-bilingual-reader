@@ -22,16 +22,10 @@ export interface ClipboardDebug {
   bytes: number;
   /** Whether the temp-file mirror has produced usable content. */
   fileOk: boolean;
-  /** How many times the HTTP route asked for the clipboard. */
-  polls: number;
   /** Which read path the helper settled on (from its stderr banner). */
   mode: string;
-  /** Last stderr tail from the watcher process (diagnosis). */
+  /** Last stderr tail from the watcher process. */
   err: string;
-  /** Temp file used by the mirror channel. */
-  file: string;
-  /** Where this diagnostic snapshot is mirrored for out-of-band inspection. */
-  status: string;
 }
 
 export interface ClipboardWatcher {
@@ -39,6 +33,11 @@ export interface ClipboardWatcher {
   read(): string;
   /** Whether the watcher process is alive. */
   available(): boolean;
+  /**
+   * Snapshot for the client's in-tab failure message. The plugin's routes are
+   * fenced to the Electron renderer, so the user cannot inspect them from a
+   * browser; surfacing the reason in the tab is the only practical channel.
+   */
   debug(): ClipboardDebug;
   dispose(): void;
 }
@@ -51,30 +50,11 @@ export function startClipboardWatcher(): ClipboardWatcher {
   let bytes = 0;
   let err = '';
   let fileOk = false;
-  let polls = 0;
   let mode = '';
   let child: any;
 
   const file = path.join(os.tmpdir(), `dsh-bl-clip-${process.pid}.txt`);
-  const status = path.join(os.tmpdir(), `dsh-bl-clip-${process.pid}.status.json`);
   try { fs.writeFileSync(file, ''); } catch { /* ignore */ }
-
-  // The plugin's own HTTP routes are fenced to the Electron renderer by
-  // Desktop's `permits()`, so a plain browser (or a human) cannot read the
-  // route's JSON to find out what went wrong. Mirroring the same snapshot to a
-  // temp file keeps the feature diagnosable from outside the app entirely.
-  let lastWrite = 0;
-  const writeStatus = (force = false): void => {
-    const now = Date.now();
-    if (!force && now - lastWrite < 900) return;
-    lastWrite = now;
-    try {
-      fs.writeFileSync(status, JSON.stringify({
-        pid: process.pid, platform: process.platform, mode, available,
-        lines, bytes, fileOk, polls, err, file, status,
-      }, null, 2));
-    } catch { /* ignore */ }
-  };
 
   const platform = process.platform;
   let cmd = '';
@@ -124,13 +104,12 @@ export function startClipboardWatcher(): ClipboardWatcher {
   try {
     child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
     available = true;
-    child.on('error', (e: any) => { available = false; err = (err + ' | spawn error: ' + (e?.message ?? String(e))).slice(-600); writeStatus(true); });
-    child.on('exit', (code: number) => { available = false; err = (err + ' | exit ' + code).slice(-600); writeStatus(true); });
+    child.on('error', (e: any) => { available = false; err = (err + ' | spawn error: ' + (e?.message ?? String(e))).slice(-600); });
+    child.on('exit', (code: number) => { available = false; err = (err + ' | exit ' + code).slice(-600); });
     child.stderr?.on('data', (d: Buffer) => {
       err = (err + d.toString('utf8')).slice(-600);
       const m = /mode=(\S+)/.exec(err);
       if (m) mode = m[1];
-      writeStatus(true);
     });
     child.stdout?.on('data', (d: Buffer) => {
       bytes += d.length;
@@ -140,15 +119,13 @@ export function startClipboardWatcher(): ClipboardWatcher {
         const line = buf.slice(0, i).trim();
         buf = buf.slice(i + 1);
         if (!line) continue;
-        try { text = Buffer.from(line, 'base64').toString('utf8'); lines++; writeStatus(true); } catch { /* ignore bad line */ }
+        try { text = Buffer.from(line, 'base64').toString('utf8'); lines++; } catch { /* ignore bad line */ }
       }
     });
   } catch (e: any) {
     available = false;
     err = (err + ' | spawn threw: ' + (e?.message ?? String(e))).slice(-600);
-    writeStatus(true);
   }
-  writeStatus(true);
 
   /** Mirror channel: the watcher writes the latest base64 into a temp file. */
   const readFile = (): string => {
@@ -164,16 +141,10 @@ export function startClipboardWatcher(): ClipboardWatcher {
   return {
     read: () => text || readFile(),
     available: () => available,
-    debug: () => {
-      polls += 1;
-      writeStatus();
-      return { available, lines, bytes, fileOk, polls, mode, err, file, status };
-    },
+    debug: () => ({ available, lines, bytes, fileOk, mode, err }),
     dispose: () => {
       try { child?.kill(); } catch { /* ignore */ }
-      // The mirror holds real clipboard text, so drop it; the status snapshot is
-      // counters and error text only, and is deliberately left behind so the
-      // last state survives a crash or a host restart for later inspection.
+      // The mirror holds real clipboard text, so never leave it behind.
       try { fs.unlinkSync(file); } catch { /* ignore */ }
     },
   };

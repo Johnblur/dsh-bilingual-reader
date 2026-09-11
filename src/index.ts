@@ -4,7 +4,6 @@
 // (never appends to the main conversation).
 import { promises as fs } from 'node:fs';
 import { createRequire } from 'node:module';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import { extractPdf } from './host/pdf.js';
 import { chunkDocument } from './host/chunk.js';
@@ -108,17 +107,6 @@ export function apply(ctx: { llm: unknown; webServer: unknown; effect: (fn: () =
       // List .pdf files under a workdir (recursively, bounded) so the loader tab can
       // offer a "browse" picker — no manual copy/paste of a full path. Self-contained
       // (Node fs), so the plugin stays independent of better-sidebar's internal API.
-      // Client-side diagnostic sink. Desktop fences plugin routes to the Electron
-      // renderer, so the tab cannot be inspected from a normal browser; the tab
-      // posts its pipeline milestones here and the host appends them to a temp
-      // log that is readable from outside the app entirely.
-      if (pathname === '/bilingual-reader/log' && req.method === 'POST') {
-        try {
-          const line = new Date().toISOString() + ' ' + String(body?.msg ?? '').slice(0, 2000) + '\n';
-          await fs.appendFile(path.join(os.tmpdir(), 'dsh-bl-client.log'), line);
-        } catch { /* logging must never break the feature */ }
-        return json(res, 200, { ok: true });
-      }
       if (pathname === '/bilingual-reader/list-pdfs' && req.method === 'POST') {
         const root = String(body?.dir ?? '');
         const limit = Math.max(1, Math.min(500, Number(body?.limit ?? 200) || 200));

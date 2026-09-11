@@ -4,22 +4,21 @@ export interface ClipboardDebug {
     bytes: number;
     /** Whether the temp-file mirror has produced usable content. */
     fileOk: boolean;
-    /** How many times the HTTP route asked for the clipboard. */
-    polls: number;
     /** Which read path the helper settled on (from its stderr banner). */
     mode: string;
-    /** Last stderr tail from the watcher process (diagnosis). */
+    /** Last stderr tail from the watcher process. */
     err: string;
-    /** Temp file used by the mirror channel. */
-    file: string;
-    /** Where this diagnostic snapshot is mirrored for out-of-band inspection. */
-    status: string;
 }
 export interface ClipboardWatcher {
     /** Latest clipboard text seen ('' until the first change). */
     read(): string;
     /** Whether the watcher process is alive. */
     available(): boolean;
+    /**
+     * Snapshot for the client's in-tab failure message. The plugin's routes are
+     * fenced to the Electron renderer, so the user cannot inspect them from a
+     * browser; surfacing the reason in the tab is the only practical channel.
+     */
     debug(): ClipboardDebug;
     dispose(): void;
 }

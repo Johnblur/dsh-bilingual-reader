@@ -98,11 +98,9 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
     domainRef.current = domain;
 
     const load = useCallback(async () => {
-      clog('load: file=' + (file || '(none)') + ' controller=' + !!controller);
       if (!controller || !file) return;
       const { text, glossary } = await controller.loadDocument(file);
       setDoc(text); setGloss(glossary);
-      clog('load ok: fullText=' + String(text?.fullText ?? '').length);
       // Domain detection: judged ONCE per document from the WHOLE extracted text
       // (not a short selection, which would misjudge the field). Stored in a ref
       // for the translate path; shown when the user leaves the dropdown blank.
@@ -144,17 +142,6 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
       }
     }, [source, target]);
 
-    /** Fire-and-forget diagnostic post; the host appends it to a temp log. */
-    function clog(msg: string): void {
-      try {
-        void fetch('/bilingual-reader/log', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ msg }),
-        });
-      } catch { /* never let logging break the feature */ }
-    }
-
     async function doTranslate(copied: string): Promise<void> {
       const seq = ++reqSeq.current;
       // Every early return below MUST set `sel` as well as `selResult`: the result
@@ -165,9 +152,8 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
         setSel({ selection: copied, context: '' });
         setSelError(true);
         setSelResult(why);
-        clog('bail: ' + why + ' (len=' + copied.length + ' doc=' + !!doc + ' controller=' + !!controller + ')');
       };
-      if (!copied) { setSel({ selection: '', context: '' }); setSelError(true); setSelResult('（剪贴板为空：请先在 PDF 里选中并复制）'); clog('bail: empty clipboard'); return; }
+      if (!copied) { setSel({ selection: '', context: '' }); setSelError(true); setSelResult('（剪贴板为空：请先在 PDF 里选中并复制）'); return; }
       // A loaded document is only needed to recover CONTEXT, not to translate. The
       // selection can always be translated on its own, so never hard-require `doc`
       // here — requiring it made the tab silently useless whenever the reader had
@@ -228,17 +214,15 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
       // to the translator as context (it helps when the selection can't be
       // matched in the text).
       const effDomain = domainRef.current || docDomainRef.current || undefined;
-      clog('translate: doc=' + hasDoc + ' ctx=' + context.length + ' sel=' + selText.length + ' src=' + effSource + ' tgt=' + tgt + ' domain=' + (effDomain ?? '-'));
       try {
         const res = await controller.translateSelection(
           { kind: 'selection', selection: selText, context, glossary, source: effSource, target: tgt, domain: effDomain },
           new AbortController().signal, () => {},
         );
         // Only apply the result if this is still the latest request (avoid stale overwrites).
-        if (seq === reqSeq.current) { setSelResult(res); setSelError(false); clog('translate ok: len=' + String(res ?? '').length); }
+        if (seq === reqSeq.current) { setSelResult(res); setSelError(false); }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        clog('translate FAILED: ' + msg);
         if (seq === reqSeq.current) { setSelResult('翻译失败：' + msg); setSelError(true); }
       }
     }
@@ -256,7 +240,7 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
           const j = await r.json();
           if (j && typeof j.text === 'string') text = j.text;
           const d = j?.debug;
-          if (d) diag = ` [${d.source} mode=${d.mode || '-'} available=${d.available} polls=${d.polls ?? '-'} lines=${d.lines ?? '-'} fileOk=${d.fileOk ?? '-'}${d.err ? ' err=' + String(d.err).slice(0, 200) : ''}]`;
+          if (d) diag = ` [${d.source} mode=${d.mode || '-'} available=${d.available} lines=${d.lines ?? '-'} fileOk=${d.fileOk ?? '-'}${d.err ? ' err=' + String(d.err).slice(0, 200) : ''}]`;
         }
       } catch (e) {
         diag = ` [${e instanceof Error ? e.message : String(e)}]`;
@@ -301,11 +285,11 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
             if (d.err && !d.lines && !d.fileOk) {
               available = false;
               warn = `剪贴板助手报告失败：${d.err}（读法 ${d.mode || '未知'}）`;
-            } else if (!d.lines && !d.fileOk && (d.polls ?? polls) > 25) {
+            } else if (!d.lines && !d.fileOk && polls > 25) {
               // Alive but silent: the helper process started and never once
               // produced text, which means reads are failing without throwing.
               warn = `剪贴板助手已启动（读法 ${d.mode || '未知'}）但始终读不到内容`
-                + `，宿主路由被请求 ${d.polls ?? polls} 次仍未收到任何文本`
+                + `，宿主路由被请求 ${polls} 次仍未收到任何文本`
                 + (d.bytes ? `；stdout 收到 ${d.bytes} 字节但无法解析` : '；stdout 无任何输出');
             }
           }
@@ -329,7 +313,6 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
         setClipWarn(warn);
         if (text && text !== last) {
           last = text;
-          clog('poll: got text len=' + text.length);
           await doTranslate(text);
         } else if (!text) last = '';
       };
@@ -347,7 +330,6 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
         const tag = String(t?.tagName || '').toLowerCase();
         if (tag === 'input' || tag === 'textarea' || t?.isContentEditable) return;
         const text = e?.clipboardData?.getData?.('text') || '';
-        clog('paste: len=' + text.length);
         if (!text.trim()) return;
         e.preventDefault?.();
         void doTranslate(text);
