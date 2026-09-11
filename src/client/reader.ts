@@ -78,6 +78,10 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
     const [addDomainName, setAddDomainName] = useState('');
     // LLM-detected domain (from the whole extracted document text).
     const [detectedDomain, setDetectedDomain] = useState('');
+    // Why document load / domain auto-detection produced no result. Both used to
+    // fail silently, which made the auto-domain marker vanish with no
+    // explanation (context matching silently stopped working too).
+    const [loadErr, setLoadErr] = useState('');
     // Diagnostic strip collapsed by default; click to expand/collapse. Amber ⚠
     // when there's a warning (e.g. not-found match).
     const [diagExpanded, setDiagExpanded] = useState(false);
@@ -99,21 +103,40 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
 
     const load = useCallback(async () => {
       if (!controller || !file) return;
-      const { text, glossary } = await controller.loadDocument(file);
-      setDoc(text); setGloss(glossary);
+      setLoadErr('');
+      // A failed load used to reject silently (unhandled), which left BOTH the
+      // document and the auto-detected domain empty with no visible reason — the
+      // tab then looked fine while context matching and the domain marker were
+      // simply absent. Report every failure instead of swallowing it.
+      let text: any;
+      try {
+        const r = await controller.loadDocument(file);
+        text = r?.text; setDoc(r?.text); setGloss(r?.glossary ?? {});
+      } catch (e) {
+        setDoc(null); setGloss({}); setDetectedDomain(''); docDomainRef.current = '';
+        setLoadErr('文档加载失败：' + (e instanceof Error ? e.message : String(e)));
+        return;
+      }
       // Domain detection: judged ONCE per document from the WHOLE extracted text
       // (not a short selection, which would misjudge the field). Stored in a ref
       // for the translate path; shown when the user leaves the dropdown blank.
       const full = text?.fullText ?? '';
-      if (full && controller.detectDomain) {
+      if (!full) {
+        setDetectedDomain(''); docDomainRef.current = '';
+        setLoadErr('未从该 PDF 提取到文本（可能是扫描件或纯图片型 PDF）。');
+        return;
+      }
+      if (controller.detectDomain) {
         try {
           const d = await controller.detectDomain(full.slice(0, 8000));
           const slug = (d || '').toLowerCase();
           setDetectedDomain(slug);
           docDomainRef.current = slug;
-        } catch { setDetectedDomain(''); docDomainRef.current = ''; }
-      } else {
-        setDetectedDomain(''); docDomainRef.current = '';
+          if (!slug) setLoadErr('领域自动识别没有返回结果（翻译不受影响，可手动指定领域）。');
+        } catch (e) {
+          setDetectedDomain(''); docDomainRef.current = '';
+          setLoadErr('领域自动识别失败：' + (e instanceof Error ? e.message : String(e)));
+        }
       }
     }, [controller, file]);
 
@@ -466,28 +489,35 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
         // Diagnostic strip: one-line summary of detected language · domain ·
         // match status. Click to expand/collapse (user-controlled). A not-found
         // match tints it amber with ⚠, but keeps it collapsed.
-        const hasWarn = matchSel.kind === 'not-found';
         const open = diagExpanded;
         const parts: string[] = [];
         if (detected) parts.push('识别为 ' + detected.replace(/（.*?）$/, ''));
-        if (detectedDomain && !domain) parts.push('领域 ' + domainLabel(detectedDomain));
+        // The auto-detected domain is ALWAYS reported, even when the user has
+        // pinned one by hand. Hiding it behind `!domain` made the auto-recognition
+        // result silently disappear as soon as a domain was selected (and the
+        // pinned choice persists in localStorage, so it never came back).
         if (domain) parts.push('领域 ' + domainLabel(domain));
+        if (detectedDomain && detectedDomain !== domain) parts.push('自动识别 ' + domainLabel(detectedDomain));
         if (matchSel.kind === 'matched') parts.push('已匹配上下文');
         else if (matchSel.kind === 'multiple') parts.push('出现 ' + (matchSel.count ?? 0) + ' 次，用第一次');
         else if (matchSel.kind === 'not-found') parts.push('未定位到原文');
-        const summary = parts.join(' · ') || '暂无状态';
+        // A failed load / domain detection is a warning state, not "no status".
+        const hasWarn = matchSel.kind === 'not-found' || !!loadErr;
+        const summary = parts.join(' · ') || (loadErr ? '' : '暂无状态');
         return h('div', { style: { marginTop: 8 } },
           h('button', {
             onClick: () => setDiagExpanded((v: any) => !v),
             style: { display: 'inline-flex', alignItems: 'center', gap: 6, border: 'none', background: 'transparent', padding: 0, color: hasWarn ? 'var(--dsw-alias-state-warn-primary)' : 'var(--dsw-alias-label-tertiary)', fontSize: 12, cursor: 'pointer' },
           },
-            h('span', { style: { fontSize: 12 } }, (hasWarn ? '⚠ ' : '') + summary),
+            h('span', { style: { fontSize: 12 } }, (hasWarn ? '⚠ ' : '') + (summary || '查看状态')),
             h('span', { style: { fontSize: 10, opacity: 0.7 } }, open ? '▾' : '▸'),
           ),
           open
             ? h('div', { style: { marginTop: 6, fontSize: 12, color: 'var(--dsw-alias-label-secondary)', lineHeight: 1.6 } },
                 detected ? h('div', {}, '识别为：' + detected) : undefined,
-                (detectedDomain && !domain) ? h('div', {}, 'LLM 判断领域：' + domainLabel(detectedDomain)) : undefined,
+                domain ? h('div', {}, '手动指定领域：' + domainLabel(domain)) : undefined,
+                detectedDomain ? h('div', {}, 'LLM 判断领域：' + domainLabel(detectedDomain)) : undefined,
+                loadErr ? h('div', { style: { color: 'var(--dsw-alias-state-warn-primary)' } }, loadErr) : undefined,
                 matchSel.kind !== 'empty'
                   ? h('div', {}, matchSel.kind === 'matched'
                       ? '已匹配到原文，使用上下文翻译'
