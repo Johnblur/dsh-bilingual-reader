@@ -15,6 +15,11 @@ function fakeGateway(): { gateway: LlmGateway; calls: LlmMessage[][] } {
       opts.emit({ type: 'delta', requestId: opts.requestId, text: '文' });
       return '译文';
     },
+    // The gateway gained classification methods after this test was written; the
+    // counts below assert that TRANSLATION never consults them (they must only
+    // ever be reached from the language/domain pickers).
+    async detectLanguage() { throw new Error('unexpected detectLanguage call'); },
+    async classify() { throw new Error('unexpected classify call'); },
   };
   return { gateway, calls };
 }

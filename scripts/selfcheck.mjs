@@ -1,13 +1,13 @@
 // scripts/selfcheck.mjs — validate the PURE-LOGIC modules through Node TS type-stripping.
-// (Vitest can't run in the DSH sandbox because it spawns child processes -> spawn EPERM.
-//  This runs the pure functions without child processes. Note: Node type-stripping only
-//  resolves the `.js` specifiers of *type-only* imports, so value-importing modules like
-//  translate.ts are excluded here — those are covered by test/isolation.test.ts (vitest).)
+// Mirrors test/pure.test.ts; keep the two in step. This copy exists because Vitest
+// can't run in the DSH sandbox (it spawns child processes -> spawn EPERM), while this
+// runs the pure functions in-process. Node type-stripping only resolves the `.js`
+// specifiers of *type-only* imports, so value-importing modules like translate.ts are
+// excluded here — those are covered by test/isolation.test.ts (vitest).
 import assert from 'node:assert';
 import { chunkDocument } from '../src/host/chunk.ts';
 import { extractGlossary } from '../src/host/glossary.ts';
 import { matchLetters, contextRange } from '../src/client/match.ts';
-import { hashText } from '../src/host/cache.ts';
 import { resolveModel } from '../src/host/model.ts';
 
 let pass = 0;
@@ -48,9 +48,8 @@ t('contextRange widens symmetrically and clamps at 0', () => {
   assert.deepStrictEqual(contextRange(10, 20, 50), { from: 0, to: 70 });
 });
 
-// hashText / resolveModel
-t('hashText deterministic, resolveModel honours config and overrides', () => {
-  assert.strictEqual(hashText('x'), hashText('x'));
+// resolveModel
+t('resolveModel honours config and per-request overrides', () => {
   const cfg = { fullText: { provider: 'p1', model: 'm1' }, selection: { provider: 'p2', model: 'm2' } };
   assert.deepStrictEqual(resolveModel({ kind: 'full-text' }, cfg), { provider: 'p1', model: 'm1' });
   assert.deepStrictEqual(resolveModel({ kind: 'selection' }, cfg), { provider: 'p2', model: 'm2' });
