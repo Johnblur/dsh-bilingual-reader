@@ -98,9 +98,11 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
     domainRef.current = domain;
 
     const load = useCallback(async () => {
+      clog('load: file=' + (file || '(none)') + ' controller=' + !!controller);
       if (!controller || !file) return;
       const { text, glossary } = await controller.loadDocument(file);
       setDoc(text); setGloss(glossary);
+      clog('load ok: fullText=' + String(text?.fullText ?? '').length);
       // Domain detection: judged ONCE per document from the WHOLE extracted text
       // (not a short selection, which would misjudge the field). Stored in a ref
       // for the translate path; shown when the user leaves the dropdown blank.
@@ -142,13 +144,39 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
       }
     }, [source, target]);
 
+    /** Fire-and-forget diagnostic post; the host appends it to a temp log. */
+    function clog(msg: string): void {
+      try {
+        void fetch('/bilingual-reader/log', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ msg }),
+        });
+      } catch { /* never let logging break the feature */ }
+    }
+
     async function doTranslate(copied: string): Promise<void> {
       const seq = ++reqSeq.current;
-      if (!copied) { setSel({ selection: '', context: '' }); setSelError(true); setSelResult('（剪贴板为空：请先在 PDF 里选中并复制）'); return; }
-      if (!doc) { setSelError(true); setSelResult('（文档未加载）'); return; }
+      // Every early return below MUST set `sel` as well as `selResult`: the result
+      // panel is rendered behind `sel ? ... : hint`, so a bare `setSelResult`
+      // would write the reason into state the UI never shows — the tab would look
+      // dead while the clipboard indicator stayed green.
+      const bail = (why: string): void => {
+        setSel({ selection: copied, context: '' });
+        setSelError(true);
+        setSelResult(why);
+        clog('bail: ' + why + ' (len=' + copied.length + ' doc=' + !!doc + ' controller=' + !!controller + ')');
+      };
+      if (!copied) { setSel({ selection: '', context: '' }); setSelError(true); setSelResult('（剪贴板为空：请先在 PDF 里选中并复制）'); clog('bail: empty clipboard'); return; }
+      // A loaded document is only needed to recover CONTEXT, not to translate. The
+      // selection can always be translated on its own, so never hard-require `doc`
+      // here — requiring it made the tab silently useless whenever the reader had
+      // no PDF open.
+      const hasDoc = !!doc;
       const selText = normalizeForMatch(copied).slice(0, 1500);
+      if (!controller) { bail('（翻译服务未就绪：控制器缺失）'); return; }
       let context = '';
-      if (!selText) {
+      if (!selText || !hasDoc) {
         setMatchSel({ kind: 'empty' });
       } else {
         // Match by letter sequence only (punctuation/whitespace/case-insensitive),
@@ -164,7 +192,6 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
       }
       setSel({ selection: selText, context });
       setSelResult('');
-      if (!controller) { setSelError(true); return; }
       // Read the LIVE selection (poll may run in an old closure) from refs, so a
       // mid-session language change always takes effect.
       const src = sourceRef.current;
@@ -201,15 +228,18 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
       // to the translator as context (it helps when the selection can't be
       // matched in the text).
       const effDomain = domainRef.current || docDomainRef.current || undefined;
+      clog('translate: doc=' + hasDoc + ' ctx=' + context.length + ' sel=' + selText.length + ' src=' + effSource + ' tgt=' + tgt + ' domain=' + (effDomain ?? '-'));
       try {
         const res = await controller.translateSelection(
           { kind: 'selection', selection: selText, context, glossary, source: effSource, target: tgt, domain: effDomain },
           new AbortController().signal, () => {},
         );
         // Only apply the result if this is still the latest request (avoid stale overwrites).
-        if (seq === reqSeq.current) { setSelResult(res); setSelError(false); }
+        if (seq === reqSeq.current) { setSelResult(res); setSelError(false); clog('translate ok: len=' + String(res ?? '').length); }
       } catch (err) {
-        if (seq === reqSeq.current) { setSelResult('翻译失败：' + (err instanceof Error ? err.message : String(err))); setSelError(true); }
+        const msg = err instanceof Error ? err.message : String(err);
+        clog('translate FAILED: ' + msg);
+        if (seq === reqSeq.current) { setSelResult('翻译失败：' + msg); setSelError(true); }
       }
     }
 
@@ -297,8 +327,11 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
         if (!available && browserDenied) warn += warn ? '；' : '（浏览器剪贴板读取也被拒绝）';
         setClipAvailable(available);
         setClipWarn(warn);
-        if (text && text !== last) { last = text; await doTranslate(text); }
-        else if (!text) last = '';
+        if (text && text !== last) {
+          last = text;
+          clog('poll: got text len=' + text.length);
+          await doTranslate(text);
+        } else if (!text) last = '';
       };
       const id = setInterval(poll, 400);
       return () => clearInterval(id);
@@ -314,6 +347,7 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
         const tag = String(t?.tagName || '').toLowerCase();
         if (tag === 'input' || tag === 'textarea' || t?.isContentEditable) return;
         const text = e?.clipboardData?.getData?.('text') || '';
+        clog('paste: len=' + text.length);
         if (!text.trim()) return;
         e.preventDefault?.();
         void doTranslate(text);
@@ -484,12 +518,12 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
         );
       })(),
       h('div', { style: { marginTop: 10 } },
-        sel
+        (sel || selResult)
           ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 6 } },
-              h('div', { style: { color: '#666', fontSize: 13, maxHeight: 130, overflow: 'auto' } }, '原文：' + sel.selection),
+              sel ? h('div', { style: { color: '#666', fontSize: 13, maxHeight: 130, overflow: 'auto' } }, '原文：' + sel.selection) : undefined,
               h('div', { style: { display: 'flex', gap: 8, alignItems: 'flex-start' } },
                 h('div', { style: { flex: 1, lineHeight: 1.7, color: selError ? '#e53e3e' : '#1f2329' } }, selResult || '翻译中…'),
-                selResult ? h('button', { onClick: () => void navigator.clipboard.writeText(selResult), className: BTN_CLS }, '复制译文') : undefined,
+                selResult && !selError ? h('button', { onClick: () => void navigator.clipboard.writeText(selResult), className: BTN_CLS }, '复制译文') : undefined,
               ),
             )
           : h('p', { style: { color: '#8a8a8a', marginTop: 4, fontSize: 13 } }, '在 PDF 里选中一段文字并复制，即可自动翻译；无法自动时点「翻译选中」。'),
