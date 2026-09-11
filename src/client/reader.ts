@@ -236,14 +236,22 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
     useEffect(() => {
       let last = '';
       const poll = async () => {
+        let text = ''; let available = false;
         try {
           const r = await fetch('/bilingual-reader/clipboard');
           const j = await r.json();
-          setClipAvailable(!!j.available);
-          const text = j && typeof j.text === 'string' ? j.text : '';
-          if (text && text !== last) { last = text; await doTranslate(text); }
-          else if (!text) last = '';
+          available = !!j.available;
+          text = j && typeof j.text === 'string' ? j.text : '';
         } catch { /* ignore */ }
+        // If the host has NO clipboard source (e.g. its OS watcher could not
+        // start), fall back to the browser clipboard so auto-translate can still
+        // work. A denied read just rejects silently.
+        if (!available && typeof navigator !== 'undefined' && navigator.clipboard?.readText) {
+          try { const t = await navigator.clipboard.readText(); if (t) { text = t; available = true; } } catch { /* denied */ }
+        }
+        setClipAvailable(available);
+        if (text && text !== last) { last = text; await doTranslate(text); }
+        else if (!text) last = '';
       };
       const id = setInterval(poll, 400);
       return () => clearInterval(id);
