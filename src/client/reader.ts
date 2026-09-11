@@ -85,6 +85,34 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
     // Diagnostic strip collapsed by default; click to expand/collapse. Amber ⚠
     // when there's a warning (e.g. not-found match).
     const [diagExpanded, setDiagExpanded] = useState(false);
+    // Built-in domain set + user-added (free text). '' = auto-detect.
+    const BASE_DOMAINS = [
+      { value: '', label: '自动识别' },
+      { value: 'machine-learning', label: '机器学习' },
+      { value: 'deep-learning', label: '深度学习' },
+      { value: 'nlp', label: '自然语言处理' },
+      { value: 'computer-vision', label: '计算机视觉' },
+      { value: 'reinforcement-learning', label: '强化学习' },
+      { value: 'biology', label: '生物学' },
+      { value: 'genetics', label: '遗传学' },
+      { value: 'physics', label: '物理学' },
+      { value: 'quantum-computing', label: '量子计算' },
+      { value: 'software-engineering', label: '软件工程' },
+      { value: 'math', label: '数学' },
+    ];
+    const DOMAIN_OPTIONS = [
+      ...BASE_DOMAINS,
+      ...customDomains.map((d: any) => ({ value: d, label: d })),
+    ];
+    const domainLabel = (v: string): string => DOMAIN_OPTIONS.find((o) => o.value === v)?.label ?? v;
+    // Whether the user pinned a domain is decided ONLY by what the 领域 dropdown
+    // actually shows — never by "a domain was selected at some point". A value
+    // persisted in localStorage that no longer exists among the options cannot be
+    // rendered by the <select>, which then falls back to displaying 自动识别; such
+    // a stale value must therefore count as auto, or the UI would read 自动识别
+    // while the logic behaved as if a domain were pinned.
+    const manualDomain = domain !== '' && DOMAIN_OPTIONS.some((o) => o.value === domain);
+
     const reqSeq = useRef(0);
     // The auto-translate poll effect captures `doTranslate` from its own render
     // (old closure). Instead of adding source/target to that effect's deps (which
@@ -99,7 +127,7 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
     sourceRef.current = source;
     targetRef.current = target;
     customLangsRef.current = customLangs;
-    domainRef.current = domain;
+    domainRef.current = manualDomain ? domain : '';
 
     const load = useCallback(async () => {
       if (!controller || !file) return;
@@ -414,26 +442,7 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
     const selectStyle = { height: 24, padding: '0 4px', border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 6, background: 'var(--dsw-alias-bg-layer-1)', color: 'var(--dsw-alias-label-primary)', fontSize: 12, outline: 'none', maxWidth: 120 };
     const rangeStyle = { width: 110, accentColor: '#555' };
 
-    // Built-in domain set + user-added (free text). '' = auto-detect.
-    const BASE_DOMAINS = [
-      { value: '', label: '自动识别' },
-      { value: 'machine-learning', label: '机器学习' },
-      { value: 'deep-learning', label: '深度学习' },
-      { value: 'nlp', label: '自然语言处理' },
-      { value: 'computer-vision', label: '计算机视觉' },
-      { value: 'reinforcement-learning', label: '强化学习' },
-      { value: 'biology', label: '生物学' },
-      { value: 'genetics', label: '遗传学' },
-      { value: 'physics', label: '物理学' },
-      { value: 'quantum-computing', label: '量子计算' },
-      { value: 'software-engineering', label: '软件工程' },
-      { value: 'math', label: '数学' },
-    ];
-    const DOMAIN_OPTIONS = [
-      ...BASE_DOMAINS,
-      ...customDomains.map((d: any) => ({ value: d, label: d })),
-    ];
-    const domainLabel = (v: string): string => DOMAIN_OPTIONS.find((o) => o.value === v)?.label ?? v;
+    // User-added domains are appended to BASE_DOMAINS (see DOMAIN_OPTIONS above).
     const addCustomDomain = (): void => {
       const name = addDomainName.trim();
       if (!name) return;
@@ -462,7 +471,9 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
           h('option', { value: '__custom', key: '__custom' }, '＋语言…'),
         ),
         h('label', { style: { fontSize: 12, color: '#555' } }, '领域'),
-        h('select', { value: domain, onChange: (e: any) => { const v = e.target.value; if (v === '__custom') { setShowAddDomain(true); } else { setDomain(v); } }, style: selectStyle },
+        // Bound to the effective value, so the control can never display 自动识别
+        // while the state still holds a domain the option list does not contain.
+        h('select', { value: manualDomain ? domain : '', onChange: (e: any) => { const v = e.target.value; if (v === '__custom') { setShowAddDomain(true); } else { setDomain(v); } }, style: selectStyle },
           DOMAIN_OPTIONS.map((o: any) => h('option', { value: o.value, key: o.value }, o.label)),
           h('option', { value: '__custom', key: '__custom' }, '＋领域…'),
         ),
@@ -492,12 +503,10 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
         const open = diagExpanded;
         const parts: string[] = [];
         if (detected) parts.push('识别为 ' + detected.replace(/（.*?）$/, ''));
-        // The auto-detected domain is ALWAYS reported, even when the user has
-        // pinned one by hand. Hiding it behind `!domain` made the auto-recognition
-        // result silently disappear as soon as a domain was selected (and the
-        // pinned choice persists in localStorage, so it never came back).
-        if (domain) parts.push('领域 ' + domainLabel(domain));
-        if (detectedDomain && detectedDomain !== domain) parts.push('自动识别 ' + domainLabel(detectedDomain));
+        // Driven purely by the dropdown's current value: a pinned domain is in
+        // effect, otherwise the auto-detected one is. No history is consulted.
+        if (manualDomain) parts.push('领域 ' + domainLabel(domain));
+        else if (detectedDomain) parts.push('自动识别 ' + domainLabel(detectedDomain));
         if (matchSel.kind === 'matched') parts.push('已匹配上下文');
         else if (matchSel.kind === 'multiple') parts.push('出现 ' + (matchSel.count ?? 0) + ' 次，用第一次');
         else if (matchSel.kind === 'not-found') parts.push('未定位到原文');
@@ -515,8 +524,10 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
           open
             ? h('div', { style: { marginTop: 6, fontSize: 12, color: 'var(--dsw-alias-label-secondary)', lineHeight: 1.6 } },
                 detected ? h('div', {}, '识别为：' + detected) : undefined,
-                domain ? h('div', {}, '手动指定领域：' + domainLabel(domain)) : undefined,
-                detectedDomain ? h('div', {}, 'LLM 判断领域：' + domainLabel(detectedDomain)) : undefined,
+                manualDomain ? h('div', {}, '手动指定领域：' + domainLabel(domain)) : undefined,
+                detectedDomain
+                  ? h('div', {}, 'LLM 判断领域：' + domainLabel(detectedDomain) + (manualDomain ? '（手动指定优先，未采用）' : ''))
+                  : undefined,
                 loadErr ? h('div', { style: { color: 'var(--dsw-alias-state-warn-primary)' } }, loadErr) : undefined,
                 matchSel.kind !== 'empty'
                   ? h('div', {}, matchSel.kind === 'matched'
