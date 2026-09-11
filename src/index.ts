@@ -11,6 +11,7 @@ import { extractGlossary } from './host/glossary.js';
 import { createLlmGateway, type LlmGateway } from './host/llmClient.js';
 import { translateChunk, translateSelection, detectTextLanguage, detectDomain } from './host/translate.js';
 import { resolveModel } from './host/model.js';
+import { startClipboardWatcher, type ClipboardWatcher } from './host/clipboard.js';
 import type { DocChunk, TranslateRequest } from './types.js';
 
 export const inject = ['llm', 'webServer'];
@@ -29,6 +30,15 @@ export function apply(ctx: { llm: unknown; webServer: unknown; effect: (fn: () =
   // route disposer (see below) stops the stale one from being reachable.
   let chunks: DocChunk[] = [];
   let glossary: Record<string, string> = {};
+
+  // OS-clipboard watcher (no Electron): started lazily on the first clipboard
+  // request and killed when the fiber unloads. DSH >= 2.0.9 runs the host in an
+  // Electron utilityProcess where `require('electron')` is unavailable, so the
+  // old electron.clipboard path is only a best-effort fast path now.
+  let clipWatcher: ClipboardWatcher | null = null;
+  const ensureClipWatcher = (): ClipboardWatcher => (clipWatcher ??= startClipboardWatcher());
+  ctx.effect(() => () => { try { clipWatcher?.dispose(); } catch { /* ignore */ } clipWatcher = null; },
+    'dsh-bilingual-reader: clipboard watcher');
 
   // Route registration goes through ctx.effect: the disposer returned by
   // webServer.register is collected and auto-invoked when the fiber unloads,
@@ -59,15 +69,20 @@ export function apply(ctx: { llm: unknown; webServer: unknown; effect: (fn: () =
         res.end(data);
         return;
       }
-      // Read the OS clipboard (Electron only; falls back to empty on web). Lets us
-      // auto-translate as soon as the user copies a selection from the native PDF viewer.
+      // Read the OS clipboard. Prefer Electron's clipboard when the host still
+      // runs in an Electron process (older DSH); otherwise use the OS-level
+      // watcher (DSH >= 2.0.9 host runs in a utilityProcess with no `electron`).
       if (pathname === '/bilingual-reader/clipboard' && req.method === 'GET') {
         let text = ''; let available = false;
         try {
           const electron = nodeRequire('electron') as any;
-          available = !!electron?.clipboard;
-          text = (electron?.clipboard?.readText?.() ?? '');
-        } catch { available = false; text = ''; }
+          if (electron?.clipboard?.readText) { available = true; text = String(electron.clipboard.readText() ?? ''); }
+        } catch { available = false; }
+        if (!available) {
+          const w = ensureClipWatcher();
+          available = w.available();
+          text = w.read();
+        }
         return json(res, 200, { text, available });
       }
       // Serve pdf.js's browser build + worker so the client can import them at runtime

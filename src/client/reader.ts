@@ -209,9 +209,23 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
     }
 
     async function onClipboardTranslate(): Promise<void> {
+      // 1) Host route first — it uses the OS clipboard watcher (works when the
+      //    host runs in a utilityProcess without Electron), or Electron if present.
+      let text = '';
       try {
-        await doTranslate(await navigator.clipboard.readText());
-      } catch (err) {
+        const r = await fetch('/bilingual-reader/clipboard');
+        const j = await r.json();
+        if (j && typeof j.text === 'string') text = j.text;
+      } catch { /* fall through */ }
+      // 2) Fall back to the browser clipboard (a click is a user gesture).
+      if (!text) {
+        try { text = await navigator.clipboard.readText(); } catch { /* ignore */ }
+      }
+      if (!text) {
+        setSelResult('（未能读取剪贴板：请先在 PDF 里选中并复制，确认系统剪贴板有文本）'); setSelError(true);
+        return;
+      }
+      try { await doTranslate(text); } catch (err) {
         setSelResult('读取剪贴板失败：' + (err instanceof Error ? err.message : String(err))); setSelError(true);
       }
     }
