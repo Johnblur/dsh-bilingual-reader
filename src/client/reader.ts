@@ -58,6 +58,11 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
     const [topPct, setTopPct] = useState(75);
     const [contextLen, setContextLen] = useState(initialContextLen());
     const [clipAvailable, setClipAvailable] = useState(false);
+    // Human-readable clipboard failure text, surfaced directly in the tab.
+    // Desktop fences plugin routes to the Electron renderer, so a normal browser
+    // cannot read the host route's JSON to debug it — showing the reason here is
+    // the only practical channel.
+    const [clipWarn, setClipWarn] = useState('');
     const [selError, setSelError] = useState(false);
     // Multi-language: persisted selection + user-added languages.
     const [customLangs, setCustomLangs] = useState(initialCustom() as any);
@@ -215,11 +220,17 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
       let diag = '';
       try {
         const r = await fetch('/bilingual-reader/clipboard');
-        const j = await r.json();
-        if (j && typeof j.text === 'string') text = j.text;
-        const d = j?.debug;
-        if (d) diag = ` [${d.source} available=${d.available} lines=${d.lines ?? '-'} fileOk=${d.fileOk ?? '-'}${d.err ? ' err=' + String(d.err).slice(0, 160) : ''}]`;
-      } catch { /* fall through */ }
+        if (!r.ok) {
+          diag = ` [host route HTTP ${r.status}]`;
+        } else {
+          const j = await r.json();
+          if (j && typeof j.text === 'string') text = j.text;
+          const d = j?.debug;
+          if (d) diag = ` [${d.source} mode=${d.mode || '-'} available=${d.available} polls=${d.polls ?? '-'} lines=${d.lines ?? '-'} fileOk=${d.fileOk ?? '-'}${d.err ? ' err=' + String(d.err).slice(0, 200) : ''}]`;
+        }
+      } catch (e) {
+        diag = ` [${e instanceof Error ? e.message : String(e)}]`;
+      }
       // 2) Fall back to the browser clipboard (a click is a user gesture).
       if (!text) {
         try { text = await navigator.clipboard.readText(); } catch { /* ignore */ }
@@ -239,24 +250,43 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
     useEffect(() => {
       let last = '';
       let lastBrowserTry = 0;
+      let polls = 0;
       const poll = async () => {
         let text = ''; let available = false;
+        let warn = '';
+        polls += 1;
         try {
           const r = await fetch('/bilingual-reader/clipboard');
-          const j = await r.json();
-          available = !!j.available;
-          text = j && typeof j.text === 'string' ? j.text : '';
-          const d = j?.debug || {};
-          // The host watcher may be alive yet unable to read anything (e.g. its
-          // helper process has no clipboard access in that environment). In that
-          // case it reports why, and `available` must not claim success —
-          // otherwise the ✓ lies and no fallback is ever attempted.
-          if (d.err && !d.lines && !d.fileOk) available = false;
-        } catch { /* ignore */ }
+          if (!r.ok) {
+            warn = `宿主路由返回 HTTP ${r.status}（插件路由被 Desktop 的浏览器访问围栏拦下）`;
+          } else {
+            const j = await r.json();
+            available = !!j.available;
+            text = j && typeof j.text === 'string' ? j.text : '';
+            const d = j?.debug || {};
+            // The host watcher may be alive yet unable to read anything (e.g. its
+            // helper process has no clipboard access in that environment). In that
+            // case it reports why, and `available` must not claim success —
+            // otherwise the ✓ lies and no fallback is ever attempted.
+            if (d.err && !d.lines && !d.fileOk) {
+              available = false;
+              warn = `剪贴板助手报告失败：${d.err}（读法 ${d.mode || '未知'}）`;
+            } else if (!d.lines && !d.fileOk && (d.polls ?? polls) > 25) {
+              // Alive but silent: the helper process started and never once
+              // produced text, which means reads are failing without throwing.
+              warn = `剪贴板助手已启动（读法 ${d.mode || '未知'}）但始终读不到内容`
+                + `，宿主路由被请求 ${d.polls ?? polls} 次仍未收到任何文本`
+                + (d.bytes ? `；stdout 收到 ${d.bytes} 字节但无法解析` : '；stdout 无任何输出');
+            }
+          }
+        } catch (e) {
+          warn = `无法访问宿主路由：${e instanceof Error ? e.message : String(e)}`;
+        }
         // Fall back to the browser clipboard: on a user gesture for the button,
         // and here opportunistically (a denied read just rejects silently).
+        let browserDenied = false;
         if (!available && typeof navigator !== 'undefined' && navigator.clipboard?.readText) {
-          try { const t = await navigator.clipboard.readText(); if (t) { text = t; available = true; } } catch { /* denied */ }
+          try { const t = await navigator.clipboard.readText(); if (t) { text = t; available = true; } } catch { browserDenied = true; }
         } else if (!text && typeof navigator !== 'undefined' && navigator.clipboard?.readText) {
           const now = Date.now();
           if (now - lastBrowserTry > 3000) {
@@ -264,7 +294,9 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
             try { const t = await navigator.clipboard.readText(); if (t) { text = t; available = true; } } catch { /* denied */ }
           }
         }
+        if (!available && browserDenied) warn += warn ? '；' : '（浏览器剪贴板读取也被拒绝）';
         setClipAvailable(available);
+        setClipWarn(warn);
         if (text && text !== last) { last = text; await doTranslate(text); }
         else if (!text) last = '';
       };
@@ -399,6 +431,14 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
         h('input', { type: 'range', min: 0, max: 800, step: 50, value: contextLen, onChange: (e: any) => setContextLen(Number(e.target.value)), style: rangeStyle }),
         h('span', { style: { fontSize: 12, color: '#555' } }, contextLen + ' 字'),
       ),
+      clipWarn
+        ? h('div', {
+            style: {
+              marginTop: 8, fontSize: 12, lineHeight: 1.6, wordBreak: 'break-word',
+              color: 'var(--dsw-alias-state-warn-primary)',
+            },
+          }, '⚠ ' + clipWarn)
+        : undefined,
       (showAddLang || showAddDomain)
         ? h('div', { style: { display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 } },
             h('input', { value: showAddDomain ? addDomainName : addLangName, placeholder: showAddDomain ? '领域名（如 经济学）' : '语言名（如 法语 / French）', onChange: (e: any) => { if (showAddDomain) setAddDomainName(e.target.value); else setAddLangName(e.target.value); }, style: { ...inputBase, flex: 1 } }),
