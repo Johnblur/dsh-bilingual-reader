@@ -73,17 +73,21 @@ export function apply(ctx: { llm: unknown; webServer: unknown; effect: (fn: () =
       // runs in an Electron process (older DSH); otherwise use the OS-level
       // watcher (DSH >= 2.0.9 host runs in a utilityProcess with no `electron`).
       if (pathname === '/bilingual-reader/clipboard' && req.method === 'GET') {
-        let text = ''; let available = false;
+        let text = ''; let available = false; let debug: any = null;
         try {
           const electron = nodeRequire('electron') as any;
-          if (electron?.clipboard?.readText) { available = true; text = String(electron.clipboard.readText() ?? ''); }
+          if (electron?.clipboard?.readText) {
+            available = true; text = String(electron.clipboard.readText() ?? '');
+            debug = { source: 'electron' };
+          }
         } catch { available = false; }
         if (!available) {
           const w = ensureClipWatcher();
           available = w.available();
           text = w.read();
+          debug = { source: 'watcher', ...w.debug() };
         }
-        return json(res, 200, { text, available });
+        return json(res, 200, { text, available, debug });
       }
       // Serve pdf.js's browser build + worker so the client can import them at runtime
       // (avoids bundling pdf.js into the __ModuleLoader__ client, and no native canvas).

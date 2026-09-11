@@ -6,7 +6,7 @@
 import assert from 'node:assert';
 import { chunkDocument } from '../src/host/chunk.ts';
 import { extractGlossary } from '../src/host/glossary.ts';
-import { buildSelectionContext } from '../src/client/hooks.ts';
+import { matchLetters, contextRange } from '../src/client/match.ts';
 import { hashText } from '../src/host/cache.ts';
 import { resolveModel } from '../src/host/model.ts';
 
@@ -29,22 +29,36 @@ t('extractGlossary finds CamelCase + acronyms', () => {
   assert.strictEqual(g['RL'], undefined);
 });
 
-// buildSelectionContext
-t('buildSelectionContext returns selection plus neighbors', () => {
-  const docText = 'A\n\nB\n\nC\n\nD\n\nE';
-  const paragraphs = [{ start: 0, end: 1 }, { start: 2, end: 3 }, { start: 4, end: 5 }, { start: 6, end: 7 }, { start: 8, end: 9 }];
-  const { selection, context } = buildSelectionContext('C', docText, paragraphs, 1);
-  assert.strictEqual(selection, 'C');
-  assert.ok(context.includes('B'));
-  assert.ok(context.includes('D'));
+// matchLetters / contextRange
+t('matchLetters locates a selection by its letter run', () => {
+  const doc = 'Intro text. The RoPE trick rotates queries. More text.';
+  const m = matchLetters(doc, 'RoPE trick rotates');
+  assert.ok(m, 'expected a match');
+  assert.strictEqual(doc.slice(m.start, m.end), 'RoPE trick rotates');
+  assert.strictEqual(m.count, 1);
+  // Punctuation/whitespace differences must not break the match.
+  const loose = matchLetters(doc, 'rope   trick, rotates');
+  assert.ok(loose, 'expected a whitespace/punctuation-insensitive match');
+  assert.strictEqual(doc.slice(loose.start, loose.end), 'RoPE trick rotates');
+  assert.strictEqual(matchLetters(doc, 'not in the document'), null);
+});
+
+t('contextRange widens symmetrically and clamps at 0', () => {
+  assert.deepStrictEqual(contextRange(100, 120, 50), { from: 50, to: 170 });
+  assert.deepStrictEqual(contextRange(10, 20, 50), { from: 0, to: 70 });
 });
 
 // hashText / resolveModel
-t('hashText deterministic, resolveModel per kind', () => {
+t('hashText deterministic, resolveModel honours config and overrides', () => {
   assert.strictEqual(hashText('x'), hashText('x'));
-  const ft = resolveModel({ kind: 'full-text' });
-  const sel = resolveModel({ kind: 'selection' });
-  assert.notStrictEqual(ft.model, sel.model);
+  const cfg = { fullText: { provider: 'p1', model: 'm1' }, selection: { provider: 'p2', model: 'm2' } };
+  assert.deepStrictEqual(resolveModel({ kind: 'full-text' }, cfg), { provider: 'p1', model: 'm1' });
+  assert.deepStrictEqual(resolveModel({ kind: 'selection' }, cfg), { provider: 'p2', model: 'm2' });
+  // A per-request model wins; the provider still comes from the config.
+  assert.deepStrictEqual(resolveModel({ kind: 'selection', model: 'override' }, cfg), { provider: 'p2', model: 'override' });
+  // Defaults resolve to a usable target for both modes.
+  assert.ok(resolveModel({ kind: 'full-text' }).model);
+  assert.ok(resolveModel({ kind: 'selection' }).provider);
 });
 
 console.log('\nSELF-CHECK PASS (' + pass + ' assertions grouped)');

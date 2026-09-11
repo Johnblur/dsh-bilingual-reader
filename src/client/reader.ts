@@ -212,17 +212,20 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
       // 1) Host route first — it uses the OS clipboard watcher (works when the
       //    host runs in a utilityProcess without Electron), or Electron if present.
       let text = '';
+      let diag = '';
       try {
         const r = await fetch('/bilingual-reader/clipboard');
         const j = await r.json();
         if (j && typeof j.text === 'string') text = j.text;
+        const d = j?.debug;
+        if (d) diag = ` [${d.source} available=${d.available} lines=${d.lines ?? '-'} fileOk=${d.fileOk ?? '-'}${d.err ? ' err=' + String(d.err).slice(0, 160) : ''}]`;
       } catch { /* fall through */ }
       // 2) Fall back to the browser clipboard (a click is a user gesture).
       if (!text) {
         try { text = await navigator.clipboard.readText(); } catch { /* ignore */ }
       }
       if (!text) {
-        setSelResult('（未能读取剪贴板：请先在 PDF 里选中并复制，确认系统剪贴板有文本）'); setSelError(true);
+        setSelResult('（未能读取剪贴板：请先在 PDF 里选中并复制，然后在本页按 Ctrl+V）' + diag); setSelError(true);
         return;
       }
       try { await doTranslate(text); } catch (err) {
@@ -235,6 +238,7 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
     // fallback (web / if polling is unavailable).
     useEffect(() => {
       let last = '';
+      let lastBrowserTry = 0;
       const poll = async () => {
         let text = ''; let available = false;
         try {
@@ -242,12 +246,23 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
           const j = await r.json();
           available = !!j.available;
           text = j && typeof j.text === 'string' ? j.text : '';
+          const d = j?.debug || {};
+          // The host watcher may be alive yet unable to read anything (e.g. its
+          // helper process has no clipboard access in that environment). In that
+          // case it reports why, and `available` must not claim success —
+          // otherwise the ✓ lies and no fallback is ever attempted.
+          if (d.err && !d.lines && !d.fileOk) available = false;
         } catch { /* ignore */ }
-        // If the host has NO clipboard source (e.g. its OS watcher could not
-        // start), fall back to the browser clipboard so auto-translate can still
-        // work. A denied read just rejects silently.
+        // Fall back to the browser clipboard: on a user gesture for the button,
+        // and here opportunistically (a denied read just rejects silently).
         if (!available && typeof navigator !== 'undefined' && navigator.clipboard?.readText) {
           try { const t = await navigator.clipboard.readText(); if (t) { text = t; available = true; } } catch { /* denied */ }
+        } else if (!text && typeof navigator !== 'undefined' && navigator.clipboard?.readText) {
+          const now = Date.now();
+          if (now - lastBrowserTry > 3000) {
+            lastBrowserTry = now;
+            try { const t = await navigator.clipboard.readText(); if (t) { text = t; available = true; } } catch { /* denied */ }
+          }
         }
         setClipAvailable(available);
         if (text && text !== last) { last = text; await doTranslate(text); }
@@ -255,6 +270,24 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
       };
       const id = setInterval(poll, 400);
       return () => clearInterval(id);
+    }, [doc, glossary, controller, contextLen]);
+
+    // Last-resort capture that needs NO permission and no host API: paste.
+    // `navigator.clipboard.readText()` can be denied and the host may have no
+    // clipboard source at all, but a real Ctrl+V always carries the text. So
+    // after copying a selection in the PDF, Ctrl+V inside this tab translates it.
+    useEffect(() => {
+      const onPaste = (e: any) => {
+        const t = e?.target as any;
+        const tag = String(t?.tagName || '').toLowerCase();
+        if (tag === 'input' || tag === 'textarea' || t?.isContentEditable) return;
+        const text = e?.clipboardData?.getData?.('text') || '';
+        if (!text.trim()) return;
+        e.preventDefault?.();
+        void doTranslate(text);
+      };
+      window.addEventListener('paste', onPaste);
+      return () => window.removeEventListener('paste', onPaste);
     }, [doc, glossary, controller, contextLen]);
 
     function onDividerDown(e: any): void {
