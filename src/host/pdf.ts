@@ -8,8 +8,16 @@
 // which matches the copied selection correctly.
 import { promises as fs } from 'node:fs';
 import type { DocumentText } from '../types.js';
+// Use pdfjs's LEGACY build: it is the one pdfjs documents for Node ("Please use
+// the `legacy` build in Node.js environments"). The modern build expects browser
+// globals such as DOMMatrix/Path2D and aborts the load where they are missing —
+// and the DSH >= 2.0.9 host runs in an Electron utilityProcess, not a browser.
+// The legacy build polyfills exactly those globals, and its text output is
+// byte-identical (verified across every PDF in the library). The browser-facing
+// /pdf.mjs and /pdf.worker.mjs routes in index.ts must keep serving the MODERN
+// build — only this Node-side import changes.
 // eslint-disable-next-line import/no-unresolved
-import { getDocument } from 'pdfjs-dist';
+import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 
 interface TextItem { str: string; transform: number[]; width: number; height: number }
 

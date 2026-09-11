@@ -12,7 +12,23 @@ async function post(path: string, body: unknown): Promise<any> {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body ?? {}),
   });
-  return res.json();
+  // The host reports failures as { error } with a non-2xx status. Parsing that
+  // like a normal result made a failed request indistinguishable from an empty
+  // one: a rejected PDF load came back as `undefined`, and the reader then blamed
+  // the PDF for having no extractable text instead of showing the real reason.
+  // Always throw on a non-OK status so the message actually reaches the user.
+  // The body is read as text first, because a fenced route answers with plain
+  // "forbidden" and JSON.parse would then hide the status entirely.
+  const raw = await res.text();
+  let data: any = null;
+  try { data = raw ? JSON.parse(raw) : null; } catch { /* not JSON (e.g. 403 text) */ }
+  if (!res.ok) {
+    const detail = (data && typeof data.error === 'string')
+      ? data.error
+      : (raw ? raw.slice(0, 300) : '(空响应)');
+    throw new Error(`HTTP ${res.status} ${detail}`);
+  }
+  return data;
 }
 
 // A "translate / languages" glyph matching better-sidebar's 16px outline icon

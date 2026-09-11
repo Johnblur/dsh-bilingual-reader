@@ -142,16 +142,23 @@ export function makeReader({ h, useState, useEffect, useCallback, useRef }: Reac
         text = r?.text; setDoc(r?.text); setGloss(r?.glossary ?? {});
       } catch (e) {
         setDoc(null); setGloss({}); setDetectedDomain(''); docDomainRef.current = '';
-        setLoadErr('文档加载失败：' + (e instanceof Error ? e.message : String(e)));
+        setLoadErr('文档加载失败：' + (e instanceof Error ? e.message : String(e)) + '（' + file + '）');
         return;
       }
       // Domain detection: judged ONCE per document from the WHOLE extracted text
       // (not a short selection, which would misjudge the field). Stored in a ref
       // for the translate path; shown when the user leaves the dropdown blank.
+      // "no payload" and "payload with no text" are different failures and must
+      // not share a message: the first is a request problem, the second a PDF one.
+      if (!text) {
+        setDetectedDomain(''); docDomainRef.current = '';
+        setLoadErr('宿主返回的抽取结果里没有文本字段（请求可能没走到抽取逻辑）：' + file);
+        return;
+      }
       const full = text?.fullText ?? '';
       if (!full) {
         setDetectedDomain(''); docDomainRef.current = '';
-        setLoadErr('未从该 PDF 提取到文本（可能是扫描件或纯图片型 PDF）。');
+        setLoadErr('已读取该 PDF 但未提取到文本（可能是扫描件或纯图片型 PDF）：' + file);
         return;
       }
       if (controller.detectDomain) {
